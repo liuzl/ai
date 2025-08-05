@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 // openaiClient implements the AIClient interface for the OpenAI provider.
@@ -16,6 +17,7 @@ type openaiClient struct {
 	baseURL    string
 	apiVersion string
 	httpClient *http.Client
+	maxRetries int
 }
 
 // newOpenAIClient is the internal constructor for the OpenAI client.
@@ -29,6 +31,7 @@ func newOpenAIClient(cfg *Config) Client {
 		baseURL:    baseURL,
 		apiVersion: "v1",
 		httpClient: &http.Client{Timeout: cfg.timeout},
+		maxRetries: 3,
 	}
 }
 
@@ -160,21 +163,32 @@ func (c *openaiClient) doJSONRequest(ctx context.Context, method, path string, r
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("HTTP request failed: %w", err)
+
+	var httpResp *http.Response
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		httpResp, err = c.httpClient.Do(httpReq)
+		if err == nil && httpResp.StatusCode < 500 {
+			break // Success or non-retriable error
+		}
+		if attempt < c.maxRetries {
+			time.Sleep(1 * time.Second) // Wait before retrying
+		}
 	}
-	defer resp.Body.Close()
-	respBodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("request failed after %d attempts: %w", c.maxRetries+1, err)
+	}
+	defer httpResp.Body.Close()
+
+	respBodyBytes, err := io.ReadAll(httpResp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
-	if resp.StatusCode >= 400 {
+	if httpResp.StatusCode >= 400 {
 		var apiError openaiErrorResponse
 		if err := json.Unmarshal(respBodyBytes, &apiError); err != nil {
-			return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBodyBytes))
+			return fmt.Errorf("HTTP %d: %s", httpResp.StatusCode, string(respBodyBytes))
 		}
-		return fmt.Errorf("API error %d: %s", resp.StatusCode, apiError.Error.Message)
+		return fmt.Errorf("API error %d: %s", httpResp.StatusCode, apiError.Error.Message)
 	}
 	if respBody != nil {
 		if err := json.Unmarshal(respBodyBytes, respBody); err != nil {

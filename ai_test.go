@@ -87,7 +87,7 @@ func TestFunctionCalling(t *testing.T) {
 	if toolCall.Function != "get_current_weather" {
 		t.Fatalf("Expected function call to 'get_current_weather', but got '%s'", toolCall.Function)
 	}
-	
+
 	// Mock the function execution
 	weatherData := `{"temperature": "22", "unit": "celsius"}`
 	messages = append(messages, ai.Message{

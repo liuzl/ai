@@ -76,7 +76,6 @@ func (c *geminiClient) newGeminiRequest(req *Request) (*geminiGenerateContentReq
 			if msg.Content != "" {
 				parts = append(parts, geminiPart{Text: &msg.Content})
 			}
-			// ** THE FIX IS HERE **
 			// Correctly translate tool calls from the assistant's message history
 			if len(msg.ToolCalls) > 0 {
 				for _, tc := range msg.ToolCalls {
