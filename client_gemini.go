@@ -66,12 +66,12 @@ func (c *geminiClient) newGeminiRequest(req *Request) (*geminiGenerateContentReq
 		parts := []geminiPart{}
 
 		switch msg.Role {
-		case "user":
+		case RoleUser:
 			role = "user"
 			if msg.Content != "" {
 				parts = append(parts, geminiPart{Text: &msg.Content})
 			}
-		case "assistant", "model":
+		case RoleAssistant, RoleModel:
 			role = "model"
 			if msg.Content != "" {
 				parts = append(parts, geminiPart{Text: &msg.Content})
@@ -91,7 +91,7 @@ func (c *geminiClient) newGeminiRequest(req *Request) (*geminiGenerateContentReq
 					})
 				}
 			}
-		case "tool":
+		case RoleTool:
 			role = "function"
 			// Find the corresponding tool call to get the function name
 			if i > 0 {

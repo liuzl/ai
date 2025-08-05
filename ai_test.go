@@ -22,7 +22,7 @@ func TestSimpleChat(t *testing.T) {
 	req := &ai.Request{
 		Model: model,
 		Messages: []ai.Message{
-			{Role: "user", Content: "Tell me a one-sentence joke about programming."},
+			{Role: ai.RoleUser, Content: "Tell me a one-sentence joke about programming."},
 		},
 	}
 
@@ -62,7 +62,7 @@ func TestFunctionCalling(t *testing.T) {
 	}
 
 	// 2. Initial request asking the model to use the tool
-	messages := []ai.Message{{Role: "user", Content: "What is the weather like in Boston, MA?"}}
+	messages := []ai.Message{{Role: ai.RoleUser, Content: "What is the weather like in Boston, MA?"}}
 	req := &ai.Request{
 		Model:    model,
 		Messages: messages,
@@ -80,7 +80,7 @@ func TestFunctionCalling(t *testing.T) {
 	}
 
 	// 4. Append the assistant's request to the message history
-	messages = append(messages, ai.Message{Role: "assistant", ToolCalls: resp.ToolCalls})
+	messages = append(messages, ai.Message{Role: ai.RoleAssistant, ToolCalls: resp.ToolCalls})
 
 	// 5. Execute the tool and append the result
 	toolCall := resp.ToolCalls[0]
@@ -91,7 +91,7 @@ func TestFunctionCalling(t *testing.T) {
 	// Mock the function execution
 	weatherData := `{"temperature": "22", "unit": "celsius"}`
 	messages = append(messages, ai.Message{
-		Role:       "tool",
+		Role:       ai.RoleTool,
 		ToolCallID: toolCall.ID,
 		Content:    weatherData,
 	})

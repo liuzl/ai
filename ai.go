@@ -30,9 +30,19 @@ type Response struct {
 	ToolCalls []ToolCall // The list of tools the model wants to call
 }
 
+// Role defines the originator of a message.
+type Role string
+
+const (
+	RoleUser      Role = "user"
+	RoleAssistant Role = "assistant"
+	RoleTool      Role = "tool"
+	RoleModel     Role = "model" // For Gemini compatibility
+)
+
 // Message represents a universal message structure.
 type Message struct {
-	Role       string
+	Role       Role
 	Content    string
 	ToolCalls  []ToolCall // Used when an assistant message contains tool call requests
 	ToolCallID string     // Used when a message is a result of a tool call

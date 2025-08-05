@@ -66,7 +66,7 @@ func (c *openaiClient) newOpenAIRequest(req *Request) (*openaiChatCompletionRequ
 	for i, msg := range req.Messages {
 		// Direct mapping for roles and content
 		openaiReq.Messages[i] = openaiMessage{
-			Role:       msg.Role,
+			Role:       string(msg.Role),
 			Content:    msg.Content,
 			ToolCallID: msg.ToolCallID,
 		}
