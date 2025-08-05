@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// openaiClient implements the AIClient interface for the OpenAI provider.
+// openaiClient implements the Client interface for the OpenAI provider.
 type openaiClient struct {
 	apiKey     string
 	baseURL    string
@@ -35,7 +35,7 @@ func newOpenAIClient(cfg *Config) Client {
 	}
 }
 
-// GenerateUniversalContent implements the AIClient interface for OpenAI.
+// Generate implements the Client interface for OpenAI.
 func (c *openaiClient) Generate(ctx context.Context, req *Request) (*Response, error) {
 	// 1. Build the provider-specific request from the universal request.
 	openaiReq, err := c.newOpenAIRequest(req)

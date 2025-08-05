@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// geminiClient implements the AIClient interface for the Google Gemini provider.
+// geminiClient implements the Client interface for the Google Gemini provider.
 type geminiClient struct {
 	apiKey     string
 	baseURL    string
@@ -35,7 +35,7 @@ func newGeminiClient(cfg *Config) Client {
 	}
 }
 
-// GenerateUniversalContent implements the AIClient interface for Gemini.
+// Generate implements the Client interface for Gemini.
 func (c *geminiClient) Generate(ctx context.Context, req *Request) (*Response, error) {
 	geminiReq, err := c.newGeminiRequest(req)
 	if err != nil {

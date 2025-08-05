@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"time"
 )
 
@@ -71,11 +70,10 @@ type ToolCall struct {
 
 // Config holds all possible Configuration options for any client.
 type Config struct {
-	provider   string
-	apiKey     string
-	baseURL    string
-	httpClient *http.Client
-	timeout    time.Duration
+	provider string
+	apiKey   string
+	baseURL  string
+	timeout  time.Duration
 }
 
 // Option is the function signature for Configuration options.
