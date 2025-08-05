@@ -19,16 +19,16 @@ func TestSimpleChat(t *testing.T) {
 		return // Skips test if client setup fails
 	}
 
-	req := &ai.ContentRequest{
+	req := &ai.Request{
 		Model: model,
 		Messages: []ai.Message{
 			{Role: "user", Content: "Tell me a one-sentence joke about programming."},
 		},
 	}
 
-	resp, err := client.GenerateUniversalContent(context.Background(), req)
+	resp, err := client.Generate(context.Background(), req)
 	if err != nil {
-		t.Fatalf("GenerateUniversalContent failed: %v", err)
+		t.Fatalf("Generate failed: %v", err)
 	}
 
 	if resp.Text == "" {
@@ -63,14 +63,14 @@ func TestFunctionCalling(t *testing.T) {
 
 	// 2. Initial request asking the model to use the tool
 	messages := []ai.Message{{Role: "user", Content: "What is the weather like in Boston, MA?"}}
-	req := &ai.ContentRequest{
+	req := &ai.Request{
 		Model:    model,
 		Messages: messages,
 		Tools:    []ai.Tool{getCurrentWeatherTool},
 	}
 
 	// 3. First call to the model
-	resp, err := client.GenerateUniversalContent(context.Background(), req)
+	resp, err := client.Generate(context.Background(), req)
 	if err != nil {
 		t.Fatalf("First call failed: %v", err)
 	}
@@ -97,11 +97,11 @@ func TestFunctionCalling(t *testing.T) {
 	})
 
 	// 6. Second call to the model with the tool result
-	finalReq := &ai.ContentRequest{
+	finalReq := &ai.Request{
 		Model:    model,
 		Messages: messages,
 	}
-	finalResp, err := client.GenerateUniversalContent(context.Background(), finalReq)
+	finalResp, err := client.Generate(context.Background(), finalReq)
 	if err != nil {
 		t.Fatalf("Second call failed: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestFunctionCalling(t *testing.T) {
 }
 
 // setupTestClient is a helper function to initialize the client for tests.
-func setupTestClient(t *testing.T) (ai.AIClient, string) {
+func setupTestClient(t *testing.T) (ai.Client, string) {
 	t.Helper()
 	if err := godotenv.Load(); err != nil {
 		t.Log("No .env file found, reading from environment variables")

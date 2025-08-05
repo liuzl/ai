@@ -19,7 +19,7 @@ type openaiClient struct {
 }
 
 // newOpenAIClient is the internal constructor for the OpenAI client.
-func newOpenAIClient(cfg *config) AIClient {
+func newOpenAIClient(cfg *Config) Client {
 	baseURL := "https://api.openai.com"
 	if cfg.baseURL != "" {
 		baseURL = cfg.baseURL
@@ -33,9 +33,9 @@ func newOpenAIClient(cfg *config) AIClient {
 }
 
 // GenerateUniversalContent implements the AIClient interface for OpenAI.
-func (c *openaiClient) GenerateUniversalContent(ctx context.Context, req *ContentRequest) (*ContentResponse, error) {
+func (c *openaiClient) Generate(ctx context.Context, req *Request) (*Response, error) {
 	// 1. Build the provider-specific request from the universal request.
-	openaiReq, err := c.buildChatCompletionRequest(req)
+	openaiReq, err := c.newOpenAIRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build openai request: %w", err)
 	}
@@ -47,11 +47,11 @@ func (c *openaiClient) GenerateUniversalContent(ctx context.Context, req *Conten
 	}
 
 	// 3. Convert the provider-specific response to the universal response.
-	return c.toUniversalResponse(resp)
+	return c.toContentResponse(resp)
 }
 
-// buildChatCompletionRequest translates our universal request to an OpenAI-specific one.
-func (c *openaiClient) buildChatCompletionRequest(req *ContentRequest) (*openaiChatCompletionRequest, error) {
+// newOpenAIRequest translates our universal request to an OpenAI-specific one.
+func (c *openaiClient) newOpenAIRequest(req *Request) (*openaiChatCompletionRequest, error) {
 	openaiReq := &openaiChatCompletionRequest{
 		Model:    req.Model,
 		Messages: make([]openaiMessage, len(req.Messages)),
@@ -101,14 +101,14 @@ func (c *openaiClient) buildChatCompletionRequest(req *ContentRequest) (*openaiC
 	return openaiReq, nil
 }
 
-// toUniversalResponse translates an OpenAI-specific response to our universal one.
-func (c *openaiClient) toUniversalResponse(resp *openaiChatCompletionResponse) (*ContentResponse, error) {
+// toContentResponse translates an OpenAI-specific response to our universal one.
+func (c *openaiClient) toContentResponse(resp *openaiChatCompletionResponse) (*Response, error) {
 	if len(resp.Choices) == 0 {
-		return &ContentResponse{}, nil
+		return &Response{}, nil
 	}
 
 	choice := resp.Choices[0]
-	universalResp := &ContentResponse{
+	universalResp := &Response{
 		Text: choice.Message.Content,
 	}
 

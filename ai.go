@@ -10,22 +10,22 @@ import (
 
 // --- Public API ---
 
-// AIClient is the unified interface for different AI providers.
+// Client is the unified interface for different AI providers.
 // It abstracts the underlying implementation of each provider.
-type AIClient interface {
-	GenerateUniversalContent(ctx context.Context, req *ContentRequest) (*ContentResponse, error)
+type Client interface {
+	Generate(ctx context.Context, req *Request) (*Response, error)
 }
 
-// ContentRequest is a universal request structure for content generation.
-type ContentRequest struct {
+// Request is a universal request structure for content generation.
+type Request struct {
 	Model    string
 	Messages []Message
 	Tools    []Tool // Defines tools available to the model
 }
 
-// ContentResponse is a universal response structure.
+// Response is a universal response structure.
 // A response can have EITHER text content OR tool calls, but not both.
-type ContentResponse struct {
+type Response struct {
 	Text      string
 	ToolCalls []ToolCall // The list of tools the model wants to call
 }
@@ -59,8 +59,8 @@ type ToolCall struct {
 	Arguments string // The arguments as a JSON string
 }
 
-// config holds all possible configuration options for any client.
-type config struct {
+// Config holds all possible Configuration options for any client.
+type Config struct {
 	provider   string
 	apiKey     string
 	baseURL    string
@@ -68,40 +68,40 @@ type config struct {
 	timeout    time.Duration
 }
 
-// Option is the function signature for configuration options.
-type Option func(*config)
+// Option is the function signature for Configuration options.
+type Option func(*Config)
 
 // WithProvider sets the AI provider (e.g., "openai", "gemini"). This is required.
 func WithProvider(provider string) Option {
-	return func(c *config) {
+	return func(c *Config) {
 		c.provider = provider
 	}
 }
 
 // WithAPIKey sets the API key for authentication. This is required.
 func WithAPIKey(apiKey string) Option {
-	return func(c *config) {
+	return func(c *Config) {
 		c.apiKey = apiKey
 	}
 }
 
 // WithBaseURL sets a custom base URL for the API endpoint.
 func WithBaseURL(baseURL string) Option {
-	return func(c *config) {
+	return func(c *Config) {
 		c.baseURL = baseURL
 	}
 }
 
 // WithTimeout sets the HTTP client timeout.
 func WithTimeout(timeout time.Duration) Option {
-	return func(c *config) {
+	return func(c *Config) {
 		c.timeout = timeout
 	}
 }
 
 // NewClient is the single, unified factory function to create an AI client.
-func NewClient(opts ...Option) (AIClient, error) {
-	cfg := &config{
+func NewClient(opts ...Option) (Client, error) {
+	cfg := &Config{
 		timeout: 30 * time.Second,
 	}
 	for _, opt := range opts {

@@ -21,7 +21,7 @@ type geminiClient struct {
 }
 
 // newGeminiClient is the internal constructor for the Gemini client.
-func newGeminiClient(cfg *config) AIClient {
+func newGeminiClient(cfg *Config) Client {
 	baseURL := "https://generativelanguage.googleapis.com"
 	if cfg.baseURL != "" {
 		baseURL = cfg.baseURL
@@ -36,8 +36,8 @@ func newGeminiClient(cfg *config) AIClient {
 }
 
 // GenerateUniversalContent implements the AIClient interface for Gemini.
-func (c *geminiClient) GenerateUniversalContent(ctx context.Context, req *ContentRequest) (*ContentResponse, error) {
-	geminiReq, err := c.buildGenerateContentRequest(req)
+func (c *geminiClient) Generate(ctx context.Context, req *Request) (*Response, error) {
+	geminiReq, err := c.newGeminiRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build gemini request: %w", err)
 	}
@@ -47,16 +47,16 @@ func (c *geminiClient) GenerateUniversalContent(ctx context.Context, req *Conten
 		model = "gemini-1.5-flash"
 	}
 
-	resp, err := c.generateContent(ctx, model, geminiReq)
+	resp, err := c.callGeminiAPI(ctx, model, geminiReq)
 	if err != nil {
 		return nil, err
 	}
 
-	return c.toUniversalResponse(resp)
+	return c.toContentResponse(resp)
 }
 
-// buildGenerateContentRequest translates our universal request to a Gemini-specific one.
-func (c *geminiClient) buildGenerateContentRequest(req *ContentRequest) (*geminiGenerateContentRequest, error) {
+// newGeminiRequest translates our universal request to a Gemini-specific one.
+func (c *geminiClient) newGeminiRequest(req *Request) (*geminiGenerateContentRequest, error) {
 	geminiReq := &geminiGenerateContentRequest{
 		Contents: make([]geminiContent, len(req.Messages)),
 	}
@@ -150,14 +150,14 @@ func (c *geminiClient) buildGenerateContentRequest(req *ContentRequest) (*gemini
 	return geminiReq, nil
 }
 
-// toUniversalResponse translates a Gemini-specific response to our universal one.
-func (c *geminiClient) toUniversalResponse(resp *geminiGenerateContentResponse) (*ContentResponse, error) {
+// toContentResponse translates a Gemini-specific response to our universal one.
+func (c *geminiClient) toContentResponse(resp *geminiGenerateContentResponse) (*Response, error) {
 	if len(resp.Candidates) == 0 {
-		return &ContentResponse{}, nil
+		return &Response{}, nil
 	}
 
 	candidate := resp.Candidates[0]
-	universalResp := &ContentResponse{}
+	universalResp := &Response{}
 
 	if len(candidate.Content.Parts) > 0 {
 		part := candidate.Content.Parts[0]
@@ -183,8 +183,8 @@ func (c *geminiClient) toUniversalResponse(resp *geminiGenerateContentResponse) 
 	return universalResp, nil
 }
 
-// generateContent is the internal method that calls the Gemini API.
-func (c *geminiClient) generateContent(ctx context.Context, model string, req *geminiGenerateContentRequest) (*geminiGenerateContentResponse, error) {
+// callGeminiAPI is the internal method that calls the Gemini API.
+func (c *geminiClient) callGeminiAPI(ctx context.Context, model string, req *geminiGenerateContentRequest) (*geminiGenerateContentResponse, error) {
 	path := fmt.Sprintf("/models/%s:generateContent", model)
 	var resp geminiGenerateContentResponse
 	err := c.doJSONRequest(ctx, "POST", path, req, &resp)
