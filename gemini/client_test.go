@@ -12,7 +12,7 @@ import (
 func TestGenerateContentRequest(t *testing.T) {
 	client := NewClient(os.Getenv("GEMINI_API_KEY"), WithBaseURL(os.Getenv("GEMINI_BASE_URL")))
 
-	req := &GenerateContentRequest{Contents: []Content{{Parts: []Part{{Text: StringPtr("Hello, world!")}}}}}
+	req := &GenerateContentRequest{Contents: []Content{{Parts: []Part{{Text: Ptr("Hello, world!")}}}}}
 
 	resp, err := client.GenerateContent(context.Background(), "gemini-2.5-flash", req)
 	if err != nil {

@@ -12,13 +12,9 @@ import (
 )
 
 const (
-	// DefaultBaseURL is the default Gemini API base URL
-	DefaultBaseURL = "https://generativelanguage.googleapis.com"
-	// DefaultAPIVersion is the default API version
+	DefaultBaseURL    = "https://generativelanguage.googleapis.com"
 	DefaultAPIVersion = "v1beta"
-	// DefaultTimeout is the default HTTP client timeout
-	DefaultTimeout = 30 * time.Second
-	// DefaultMaxRetries is the default number of retries
+	DefaultTimeout    = 30 * time.Second
 	DefaultMaxRetries = 3
 )
 
@@ -78,133 +74,10 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 		httpClient: &http.Client{Timeout: DefaultTimeout},
 		maxRetries: DefaultMaxRetries,
 	}
-
 	for _, opt := range opts {
 		opt(client)
 	}
-
 	return client
-}
-
-// request represents an HTTP request
-type request struct {
-	method  string
-	path    string
-	body    any
-	headers map[string]string
-	query   map[string]string
-}
-
-// response represents an HTTP response
-type response struct {
-	StatusCode int
-	Body       []byte
-	Headers    http.Header
-}
-
-// doRequest performs an HTTP request with retry logic
-func (c *Client) doRequest(ctx context.Context, req *request) (*response, error) {
-	var lastErr error
-
-	for attempt := 0; attempt <= c.maxRetries; attempt++ {
-		resp, err := c.performRequest(ctx, req)
-		if err == nil {
-			return resp, nil
-		}
-
-		lastErr = err
-
-		// Don't retry on client errors (4xx)
-		if resp != nil && resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			break
-		}
-
-		// Wait before retrying (exponential backoff)
-		if attempt < c.maxRetries {
-			waitTime := time.Duration(1<<attempt) * time.Second
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(waitTime):
-				continue
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("request failed after %d attempts: %w", c.maxRetries+1, lastErr)
-}
-
-// performRequest performs a single HTTP request
-func (c *Client) performRequest(ctx context.Context, req *request) (*response, error) {
-	// Build URL
-	u, err := url.Parse(c.baseURL + "/" + c.apiVersion + req.path)
-	if err != nil {
-		return nil, fmt.Errorf("invalid URL: %w", err)
-	}
-
-	// Add query parameters
-	if req.query != nil {
-		q := u.Query()
-		for k, v := range req.query {
-			q.Set(k, v)
-		}
-		u.RawQuery = q.Encode()
-	}
-
-	// Prepare request body
-	var body io.Reader
-	if req.body != nil {
-		jsonBody, err := json.Marshal(req.body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal request body: %w", err)
-		}
-		body = bytes.NewReader(jsonBody)
-	}
-
-	// Create HTTP request
-	httpReq, err := http.NewRequestWithContext(ctx, req.method, u.String(), body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	// Set headers
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-goog-api-key", c.apiKey)
-
-	for k, v := range req.headers {
-		httpReq.Header.Set(k, v)
-	}
-
-	// Perform request
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	// Check for HTTP errors
-	if resp.StatusCode >= 400 {
-		var apiError ErrorResponse
-		if err := json.Unmarshal(respBody, &apiError); err != nil {
-			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
-		}
-		return nil, &APIError{
-			StatusCode: resp.StatusCode,
-			APIError:   apiError.Error,
-		}
-	}
-
-	return &response{
-		StatusCode: resp.StatusCode,
-		Body:       respBody,
-		Headers:    resp.Header,
-	}, nil
 }
 
 // APIError represents an API error
@@ -217,212 +90,191 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("API error %d: %s", e.StatusCode, e.APIError.Message)
 }
 
+// doJSONRequest is a generic helper to perform API requests and unmarshal JSON responses.
+func (c *Client) doJSONRequest(ctx context.Context, method, path string, reqBody, respBody any) error {
+	var body io.Reader
+	if reqBody != nil {
+		jsonBody, err := json.Marshal(reqBody)
+		if err != nil {
+			return fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		body = bytes.NewReader(jsonBody)
+	}
+
+	// Build URL using url.JoinPath for robustness
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return fmt.Errorf("invalid base URL: %w", err)
+	}
+	u.Path = u.Path + "/" + c.apiVersion + path
+
+	httpReq, err := http.NewRequestWithContext(ctx, method, u.String(), body)
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-goog-api-key", c.apiKey)
+
+	var resp *http.Response
+	var lastErr error
+
+	// Retry logic
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		if attempt > 0 {
+			waitTime := time.Duration(1<<uint(attempt-1)) * time.Second
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(waitTime):
+			}
+		}
+
+		resp, err = c.httpClient.Do(httpReq)
+		if err == nil {
+			// Don't retry on client errors (4xx)
+			if resp.StatusCode < 500 && resp.StatusCode >= 400 {
+				break
+			}
+			if resp.StatusCode < 400 {
+				break
+			}
+		}
+		lastErr = err
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("request failed after %d attempts: %w", c.maxRetries+1, lastErr)
+	}
+	defer resp.Body.Close()
+
+	respBodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		var apiError ErrorResponse
+		if err := json.Unmarshal(respBodyBytes, &apiError); err != nil {
+			// If we can't parse the error, return a generic one
+			return &APIError{
+				StatusCode: resp.StatusCode,
+				APIError:   Error{Message: string(respBodyBytes)},
+			}
+		}
+		return &APIError{
+			StatusCode: resp.StatusCode,
+			APIError:   apiError.Error,
+		}
+	}
+
+	if respBody != nil {
+		if err := json.Unmarshal(respBodyBytes, respBody); err != nil {
+			return fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // GenerateContent generates content using the Gemini API
 func (c *Client) GenerateContent(ctx context.Context, model string, req *GenerateContentRequest) (*GenerateContentResponse, error) {
 	path := fmt.Sprintf("/models/%s:generateContent", model)
-
-	httpReq := &request{
-		method: "POST",
-		path:   path,
-		body:   req,
-	}
-
-	resp, err := c.doRequest(ctx, httpReq)
+	var resp GenerateContentResponse
+	err := c.doJSONRequest(ctx, "POST", path, req, &resp)
 	if err != nil {
 		return nil, err
 	}
-
-	var result GenerateContentResponse
-	if err := json.Unmarshal(resp.Body, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	return &result, nil
+	return &resp, nil
 }
 
 // EmbedContent generates embeddings using the Gemini API
 func (c *Client) EmbedContent(ctx context.Context, req *EmbedContentRequest) (*EmbedContentResponse, error) {
 	path := fmt.Sprintf("/models/%s:embedContent", req.Model)
-
-	httpReq := &request{
-		method: "POST",
-		path:   path,
-		body:   req,
-	}
-
-	resp, err := c.doRequest(ctx, httpReq)
+	var resp EmbedContentResponse
+	err := c.doJSONRequest(ctx, "POST", path, req, &resp)
 	if err != nil {
 		return nil, err
 	}
-
-	var result EmbedContentResponse
-	if err := json.Unmarshal(resp.Body, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	return &result, nil
+	return &resp, nil
 }
 
 // BatchEmbedContents generates embeddings for multiple contents
 func (c *Client) BatchEmbedContents(ctx context.Context, req *BatchEmbedContentsRequest) (*BatchEmbedContentsResponse, error) {
 	path := "/models/embedding-001:batchEmbedContents"
-
-	httpReq := &request{
-		method: "POST",
-		path:   path,
-		body:   req,
-	}
-
-	resp, err := c.doRequest(ctx, httpReq)
+	var resp BatchEmbedContentsResponse
+	err := c.doJSONRequest(ctx, "POST", path, req, &resp)
 	if err != nil {
 		return nil, err
 	}
-
-	var result BatchEmbedContentsResponse
-	if err := json.Unmarshal(resp.Body, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	return &result, nil
+	return &resp, nil
 }
 
 // CountTokens counts tokens in the provided content
 func (c *Client) CountTokens(ctx context.Context, model string, req *CountTokensRequest) (*CountTokensResponse, error) {
 	path := fmt.Sprintf("/models/%s:countTokens", model)
-
-	httpReq := &request{
-		method: "POST",
-		path:   path,
-		body:   req,
-	}
-
-	resp, err := c.doRequest(ctx, httpReq)
+	var resp CountTokensResponse
+	err := c.doJSONRequest(ctx, "POST", path, req, &resp)
 	if err != nil {
 		return nil, err
 	}
-
-	var result CountTokensResponse
-	if err := json.Unmarshal(resp.Body, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	return &result, nil
+	return &resp, nil
 }
 
 // ListModels lists available models
 func (c *Client) ListModels(ctx context.Context) (*ListModelsResponse, error) {
-	httpReq := &request{
-		method: "GET",
-		path:   "/models",
-	}
-
-	resp, err := c.doRequest(ctx, httpReq)
+	var resp ListModelsResponse
+	err := c.doJSONRequest(ctx, "GET", "/models", nil, &resp)
 	if err != nil {
 		return nil, err
 	}
-
-	var result ListModelsResponse
-	if err := json.Unmarshal(resp.Body, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	return &result, nil
+	return &resp, nil
 }
 
 // GetModel gets information about a specific model
 func (c *Client) GetModel(ctx context.Context, model string) (*Model, error) {
 	path := fmt.Sprintf("/models/%s", model)
-
-	httpReq := &request{
-		method: "GET",
-		path:   path,
-	}
-
-	resp, err := c.doRequest(ctx, httpReq)
+	var resp Model
+	err := c.doJSONRequest(ctx, "GET", path, nil, &resp)
 	if err != nil {
 		return nil, err
 	}
-
-	var result Model
-	if err := json.Unmarshal(resp.Body, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	return &result, nil
+	return &resp, nil
 }
 
 // UploadFile uploads a file to the Gemini API
 func (c *Client) UploadFile(ctx context.Context, req *UploadFileRequest) (*UploadFileResponse, error) {
-	httpReq := &request{
-		method: "POST",
-		path:   "/files",
-		body:   req,
-	}
-
-	resp, err := c.doRequest(ctx, httpReq)
+	var resp UploadFileResponse
+	err := c.doJSONRequest(ctx, "POST", "/files", req, &resp)
 	if err != nil {
 		return nil, err
 	}
-
-	var result UploadFileResponse
-	if err := json.Unmarshal(resp.Body, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	return &result, nil
+	return &resp, nil
 }
 
 // ListFiles lists uploaded files
 func (c *Client) ListFiles(ctx context.Context) (*ListFilesResponse, error) {
-	httpReq := &request{
-		method: "GET",
-		path:   "/files",
-	}
-
-	resp, err := c.doRequest(ctx, httpReq)
+	var resp ListFilesResponse
+	err := c.doJSONRequest(ctx, "GET", "/files", nil, &resp)
 	if err != nil {
 		return nil, err
 	}
-
-	var result ListFilesResponse
-	if err := json.Unmarshal(resp.Body, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	return &result, nil
+	return &resp, nil
 }
 
 // GetFile gets information about a specific file
 func (c *Client) GetFile(ctx context.Context, name string) (*File, error) {
 	path := fmt.Sprintf("/files/%s", name)
-
-	httpReq := &request{
-		method: "GET",
-		path:   path,
-	}
-
-	resp, err := c.doRequest(ctx, httpReq)
+	var resp File
+	err := c.doJSONRequest(ctx, "GET", path, nil, &resp)
 	if err != nil {
 		return nil, err
 	}
-
-	var result File
-	if err := json.Unmarshal(resp.Body, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	return &result, nil
+	return &resp, nil
 }
 
 // DeleteFile deletes a file
 func (c *Client) DeleteFile(ctx context.Context, name string) error {
 	path := fmt.Sprintf("/files/%s", name)
-
-	httpReq := &request{
-		method: "DELETE",
-		path:   path,
-	}
-
-	_, err := c.doRequest(ctx, httpReq)
-	return err
+	return c.doJSONRequest(ctx, "DELETE", path, nil, nil)
 }

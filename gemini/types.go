@@ -310,19 +310,7 @@ type ErrorResponse struct {
 	Error Error `json:"error"`
 }
 
-// Helper functions for creating pointers
-func StringPtr(s string) *string {
-	return &s
-}
-
-func IntPtr(i int) *int {
-	return &i
-}
-
-func Float64Ptr(f float64) *float64 {
-	return &f
-}
-
-func BoolPtr(b bool) *bool {
-	return &b
+// Ptr is a generic helper function for creating pointers
+func Ptr[T any](v T) *T {
+	return &v
 }
