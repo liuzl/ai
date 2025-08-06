@@ -92,7 +92,7 @@ func (c *geminiClient) newGeminiRequest(req *Request) (*geminiGenerateContentReq
 				}
 			}
 		case RoleTool:
-			role = "function"
+			role = "user"
 			// Find the corresponding tool call to get the function name
 			if i > 0 {
 				prevMsg := req.Messages[i-1]
