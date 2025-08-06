@@ -5,60 +5,115 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// MCPToolExecutor handles the lifecycle of interacting with an MCP server.
-// The typical usage pattern is:
-// 1. Create an executor with NewMCPToolExecutor or NewMCPToolExecutorFromConfig.
-// 2. Call Connect() to establish a session.
-// 3. Call FetchTools() or ExecuteTool() as needed.
-// 4. Call Close() to terminate the session.
+// MCPManager discovers and manages MCP tool executors from various sources.
+// It acts as a central registry for all known tool servers.
+type MCPManager struct {
+	executors map[string]*MCPToolExecutor
+}
+
+// NewMCPManager creates a new, empty manager.
+func NewMCPManager() *MCPManager {
+	return &MCPManager{
+		executors: make(map[string]*MCPToolExecutor),
+	}
+}
+
+// LoadFromFile parses a standard mcp.json file and registers all defined
+// servers with the manager.
+func (m *MCPManager) LoadFromFile(configFile string) error {
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to read MCP config file '%s': %w", configFile, err)
+	}
+	var config MCPConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("failed to parse MCP config JSON: %w", err)
+	}
+
+	for name, serverConfig := range config.MCPServers {
+		if serverConfig.Command == "" {
+			// Silently skip invalid entries, or return an error if strictness is preferred.
+			continue
+		}
+		cmd := exec.Command(serverConfig.Command, serverConfig.Args...)
+		if len(serverConfig.Env) > 0 {
+			cmd.Env = os.Environ()
+			for key, value := range serverConfig.Env {
+				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", key, value))
+			}
+		}
+		transport := mcp.NewCommandTransport(cmd)
+		executor, err := newMCPToolExecutorWithTransport(transport)
+		if err != nil {
+			return fmt.Errorf("failed to create executor for '%s': %w", name, err)
+		}
+		m.executors[name] = executor
+	}
+	return nil
+}
+
+// AddRemoteServer programmatically registers a remote, HTTP-based MCP server.
+func (m *MCPManager) AddRemoteServer(name, url string) error {
+	if url == "" {
+		return fmt.Errorf("url cannot be empty for remote server '%s'", name)
+	}
+	if _, exists := m.executors[name]; exists {
+		return fmt.Errorf("server with name '%s' already exists", name)
+	}
+	transport := mcp.NewStreamableClientTransport(url, nil)
+	executor, err := newMCPToolExecutorWithTransport(transport)
+	if err != nil {
+		return fmt.Errorf("failed to create executor for remote server '%s': %w", name, err)
+	}
+	m.executors[name] = executor
+	return nil
+}
+
+// ListServerNames returns a slice of the names of all registered servers.
+func (m *MCPManager) ListServerNames() []string {
+	names := make([]string, 0, len(m.executors))
+	for name := range m.executors {
+		names = append(names, name)
+	}
+	return names
+}
+
+// GetExecutor retrieves a ready-to-use executor for the server with the given name.
+func (m *MCPManager) GetExecutor(name string) (*MCPToolExecutor, bool) {
+	executor, ok := m.executors[name]
+	return executor, ok
+}
+
+// --- Lower-level Executor ---
+
+// MCPToolExecutor handles the connection lifecycle for a single MCP server.
+// It should be created and managed by the MCPManager.
 type MCPToolExecutor struct {
 	client    *mcp.Client
-	transport *mcp.StreamableClientTransport
+	transport mcp.Transport
 	session   *mcp.ClientSession
 }
 
-// MCPServerConfig defines the configuration for a single MCP server.
+// MCPServerConfig defines the configuration for a command-based MCP server
+// as found in the mcp.json file.
 type MCPServerConfig struct {
-	Transport string `json:"transport"`
-	URL       string `json:"url"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	Env     map[string]string `json:"env"`
 }
 
-// MCPConfig defines the structure of the MCP servers JSON configuration file.
+// MCPConfig defines the top-level structure of the mcp.json file.
 type MCPConfig struct {
 	MCPServers map[string]MCPServerConfig `json:"mcpServers"`
 }
 
-// NewMCPToolExecutorFromConfig reads a JSON configuration file, finds the
-// server by name, and returns a new MCPToolExecutor.
-func NewMCPToolExecutorFromConfig(configFile, serverName string) (*MCPToolExecutor, error) {
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read MCP config file: %w", err)
-	}
-	var config MCPConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse MCP config JSON: %w", err)
-	}
-	serverConfig, ok := config.MCPServers[serverName]
-	if !ok {
-		return nil, fmt.Errorf("mcp server '%s' not found in config file", serverName)
-	}
-	return NewMCPToolExecutor(serverConfig.URL, serverConfig.Transport)
-}
-
-// NewMCPToolExecutor creates a new executor for a specific MCP server.
-func NewMCPToolExecutor(url, transportType string) (*MCPToolExecutor, error) {
-	var transport *mcp.StreamableClientTransport
-	switch transportType {
-	case "streamable-http":
-		transport = mcp.NewStreamableClientTransport(url, nil)
-	default:
-		return nil, fmt.Errorf("unsupported MCP transport type: %s", transportType)
-	}
+// newMCPToolExecutorWithTransport is an internal helper to create the executor.
+func newMCPToolExecutorWithTransport(transport mcp.Transport) (*MCPToolExecutor, error) {
 	return &MCPToolExecutor{
 		client:    mcp.NewClient(&mcp.Implementation{Name: "go-ai-lib", Version: "0.1.0"}, nil),
 		transport: transport,
@@ -68,7 +123,7 @@ func NewMCPToolExecutor(url, transportType string) (*MCPToolExecutor, error) {
 // Connect establishes a session with the MCP server.
 func (e *MCPToolExecutor) Connect(ctx context.Context) error {
 	if e.session != nil {
-		return fmt.Errorf("already connected")
+		return fmt.Errorf("session already established")
 	}
 	session, err := e.client.Connect(ctx, e.transport)
 	if err != nil {
@@ -89,7 +144,6 @@ func (e *MCPToolExecutor) Close() error {
 }
 
 // FetchTools lists available tools using the established session.
-// Connect() must be called before using this method.
 func (e *MCPToolExecutor) FetchTools(ctx context.Context) ([]Tool, error) {
 	if e.session == nil {
 		return nil, fmt.Errorf("not connected to MCP server, call Connect() first")
@@ -102,7 +156,7 @@ func (e *MCPToolExecutor) FetchTools(ctx context.Context) ([]Tool, error) {
 	for _, mcpTool := range mcpTools.Tools {
 		paramsJSON, err := json.Marshal(mcpTool.InputSchema)
 		if err != nil {
-			continue // Skip tools with invalid parameter schemas
+			continue
 		}
 		aiTools = append(aiTools, Tool{
 			Type: "function",
@@ -117,7 +171,6 @@ func (e *MCPToolExecutor) FetchTools(ctx context.Context) ([]Tool, error) {
 }
 
 // ExecuteTool executes a tool call using the established session.
-// Connect() must be called before using this method.
 func (e *MCPToolExecutor) ExecuteTool(ctx context.Context, toolCall ToolCall) (string, error) {
 	if e.session == nil {
 		return "", fmt.Errorf("not connected to MCP server, call Connect() first")
