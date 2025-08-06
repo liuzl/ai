@@ -165,7 +165,7 @@ func (c *openaiClient) doJSONRequest(ctx context.Context, method, path string, r
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	var httpResp *http.Response
-	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+	for attempt := range c.maxRetries {
 		httpResp, err = c.httpClient.Do(httpReq)
 		if err == nil && httpResp.StatusCode < 500 {
 			break // Success or non-retriable error
