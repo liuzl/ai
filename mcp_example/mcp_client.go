@@ -62,11 +62,7 @@ func main() {
 	messages := []ai.Message{
 		{Role: ai.RoleUser, Content: "Please list all files in the current directory using the shell and return the output."},
 	}
-	req := &ai.Request{
-		Messages: messages,
-		Tools:    aiTools, // Use the dynamically loaded tools
-	}
-
+	req := &ai.Request{Messages: messages, Tools: aiTools}
 	log.Println("Sending initial request to the model...")
 	resp, err := client.Generate(context.Background(), req)
 	if err != nil {
@@ -89,11 +85,7 @@ func main() {
 	log.Printf("Received result from MCP server: %s\n", toolResult)
 
 	// --- 6. Send the Tool's Result Back to the Model ---
-	messages = append(messages, ai.Message{
-		Role:       ai.RoleTool,
-		ToolCallID: toolCall.ID,
-		Content:    toolResult,
-	})
+	messages = append(messages, ai.Message{Role: ai.RoleTool, ToolCallID: toolCall.ID, Content: toolResult})
 	finalReq := &ai.Request{Messages: messages}
 	log.Println("Sending tool result back to the model for a final answer...")
 	finalResp, err := client.Generate(context.Background(), finalReq)
@@ -136,10 +128,7 @@ func callMCPTool(functionName string, jsonArgs string) (string, error) {
 	}
 	defer session.Close()
 
-	params := &mcp.CallToolParams{
-		Name:      functionName,
-		Arguments: args,
-	}
+	params := &mcp.CallToolParams{Name: functionName, Arguments: args}
 	res, err := session.CallTool(ctx, params)
 	if err != nil {
 		return "", fmt.Errorf("failed to call '%s' tool: %v", functionName, err)
