@@ -37,6 +37,7 @@ func main() {
 				Parameters:  json.RawMessage(paramsJSON),
 			},
 		})
+		log.Println(string(paramsJSON))
 	}
 	if len(aiTools) == 0 {
 		log.Fatal("No usable tools found on the MCP server.")
