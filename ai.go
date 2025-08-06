@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 )
 
 // --- Public API ---
 
 // Client is the unified interface for different AI providers.
-// It abstracts the underlying implementation of each provider.
 type Client interface {
 	Generate(ctx context.Context, req *Request) (*Response, error)
 }
@@ -19,14 +20,13 @@ type Client interface {
 type Request struct {
 	Model    string
 	Messages []Message
-	Tools    []Tool // Defines tools available to the model
+	Tools    []Tool
 }
 
 // Response is a universal response structure.
-// A response can have EITHER text content OR tool calls, but not both.
 type Response struct {
 	Text      string
-	ToolCalls []ToolCall // The list of tools the model wants to call
+	ToolCalls []ToolCall
 }
 
 // Role defines the originator of a message.
@@ -36,20 +36,20 @@ const (
 	RoleUser      Role = "user"
 	RoleAssistant Role = "assistant"
 	RoleTool      Role = "tool"
-	RoleModel     Role = "model" // For Gemini compatibility
+	RoleModel     Role = "model"
 )
 
 // Message represents a universal message structure.
 type Message struct {
 	Role       Role
 	Content    string
-	ToolCalls  []ToolCall // Used when an assistant message contains tool call requests
-	ToolCallID string     // Used when a message is a result of a tool call
+	ToolCalls  []ToolCall
+	ToolCallID string
 }
 
 // Tool defines a tool the model can use.
 type Tool struct {
-	Type     string             `json:"type"` // e.g., "function"
+	Type     string             `json:"type"`
 	Function FunctionDefinition `json:"function"`
 }
 
@@ -57,15 +57,15 @@ type Tool struct {
 type FunctionDefinition struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
-	Parameters  json.RawMessage `json:"parameters"` // A JSON Schema object
+	Parameters  json.RawMessage `json:"parameters"`
 }
 
 // ToolCall represents a request from the model to call a specific tool.
 type ToolCall struct {
-	ID        string // A unique ID for this tool call, needed to send back the result
-	Type      string // e.g., "function"
-	Function  string // The name of the function to call
-	Arguments string // The arguments as a JSON string
+	ID        string
+	Type      string
+	Function  string
+	Arguments string
 }
 
 // Config holds all possible Configuration options for any client.
@@ -73,45 +73,41 @@ type Config struct {
 	provider string
 	apiKey   string
 	baseURL  string
+	model    string // Added model to the config
 	timeout  time.Duration
 }
 
 // Option is the function signature for Configuration options.
 type Option func(*Config)
 
-// WithProvider sets the AI provider (e.g., "openai", "gemini"). This is required.
+// WithProvider sets the AI provider.
 func WithProvider(provider string) Option {
-	return func(c *Config) {
-		c.provider = provider
-	}
+	return func(c *Config) { c.provider = provider }
 }
 
-// WithAPIKey sets the API key for authentication. This is required.
+// WithAPIKey sets the API key for authentication.
 func WithAPIKey(apiKey string) Option {
-	return func(c *Config) {
-		c.apiKey = apiKey
-	}
+	return func(c *Config) { c.apiKey = apiKey }
 }
 
 // WithBaseURL sets a custom base URL for the API endpoint.
 func WithBaseURL(baseURL string) Option {
-	return func(c *Config) {
-		c.baseURL = baseURL
-	}
+	return func(c *Config) { c.baseURL = baseURL }
+}
+
+// WithModel sets the model name to use for the client.
+func WithModel(model string) Option {
+	return func(c *Config) { c.model = model }
 }
 
 // WithTimeout sets the HTTP client timeout.
 func WithTimeout(timeout time.Duration) Option {
-	return func(c *Config) {
-		c.timeout = timeout
-	}
+	return func(c *Config) { c.timeout = timeout }
 }
 
 // NewClient is the single, unified factory function to create an AI client.
 func NewClient(opts ...Option) (Client, error) {
-	cfg := &Config{
-		timeout: 30 * time.Second,
-	}
+	cfg := &Config{timeout: 30 * time.Second}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -131,4 +127,50 @@ func NewClient(opts ...Option) (Client, error) {
 	default:
 		return nil, fmt.Errorf("unknown provider: %q", cfg.provider)
 	}
+}
+
+// NewClientFromEnv creates a new AI client by reading configuration from
+// environment variables. It provides a convenient way to initialize the client
+// without manual configuration.
+//
+// It uses the following environment variables:
+//   - AI_PROVIDER: "openai" or "gemini" (defaults to "openai").
+//   - OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL
+//   - GEMINI_API_KEY, GEMINI_MODEL, GEMINI_BASE_URL
+func NewClientFromEnv() (Client, error) {
+	provider := os.Getenv("AI_PROVIDER")
+	if provider == "" {
+		provider = "openai" // Default to openai
+	}
+
+	var opts []Option
+	var apiKey, model, baseURL string
+
+	switch strings.ToLower(provider) {
+	case "openai":
+		apiKey = os.Getenv("OPENAI_API_KEY")
+		model = os.Getenv("OPENAI_MODEL")
+		baseURL = os.Getenv("OPENAI_BASE_URL")
+	case "gemini":
+		apiKey = os.Getenv("GEMINI_API_KEY")
+		model = os.Getenv("GEMINI_MODEL")
+		baseURL = os.Getenv("GEMINI_BASE_URL")
+	default:
+		return nil, fmt.Errorf("unsupported AI_PROVIDER: %s", provider)
+	}
+
+	if apiKey == "" {
+		return nil, fmt.Errorf("API key for provider '%s' is not set", provider)
+	}
+
+	opts = append(opts, WithProvider(provider))
+	opts = append(opts, WithAPIKey(apiKey))
+	if model != "" {
+		opts = append(opts, WithModel(model))
+	}
+	if baseURL != "" {
+		opts = append(opts, WithBaseURL(baseURL))
+	}
+
+	return NewClient(opts...)
 }

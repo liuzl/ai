@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"os"
 
 	_ "github.com/joho/godotenv/autoload"
 	"github.com/liuzl/ai"
@@ -55,14 +54,12 @@ func main() {
 	log.Println("-----------------------")
 
 	// --- 3. Setup AI Client ---
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey == "" {
-		log.Fatal("Please set the GEMINI_API_KEY environment variable.")
-	}
-	client, err := ai.NewClient(ai.WithProvider("gemini"), ai.WithAPIKey(apiKey), ai.WithBaseURL(os.Getenv("GEMINI_BASE_URL")))
+	log.Println("Initializing AI client from environment variables...")
+	client, err := ai.NewClientFromEnv()
 	if err != nil {
 		log.Fatalf("Failed to create AI client: %v", err)
 	}
+	log.Println("AI client initialized successfully.")
 
 	// --- 4. Orchestrate the AI Interaction ---
 	messages := []ai.Message{
