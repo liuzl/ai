@@ -18,9 +18,10 @@ type Client interface {
 
 // Request is a universal request structure for content generation.
 type Request struct {
-	Model    string
-	Messages []Message
-	Tools    []Tool
+	Model        string
+	SystemPrompt string
+	Messages     []Message
+	Tools        []Tool
 }
 
 // Response is a universal response structure.

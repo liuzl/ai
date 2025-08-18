@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -117,6 +120,102 @@ func TestFunctionCalling(t *testing.T) {
 	fmt.Printf("Provider: %s\n", os.Getenv("AI_PROVIDER"))
 	fmt.Printf("Final Response: %s\n", finalResp.Text)
 	fmt.Printf("---------------------------\n")
+}
+
+// TestSystemPrompt verifies that the system prompt is sent correctly for each provider.
+func TestSystemPrompt(t *testing.T) {
+	systemPrompt := "You are a helpful assistant."
+	testCases := []struct {
+		name     string
+		provider string
+		verifier func(t *testing.T, r *http.Request)
+	}{
+		{
+			name:     "OpenAI",
+			provider: "openai",
+			verifier: func(t *testing.T, r *http.Request) {
+				var reqBody map[string]interface{}
+				body, _ := io.ReadAll(r.Body)
+				if err := json.Unmarshal(body, &reqBody); err != nil {
+					t.Fatalf("Failed to unmarshal request body: %v", err)
+				}
+				messages := reqBody["messages"].([]interface{})
+				if len(messages) == 0 {
+					t.Fatal("Expected messages, but got none")
+				}
+				firstMessage := messages[0].(map[string]interface{})
+				if firstMessage["role"] != "system" {
+					t.Errorf("Expected first message role to be 'system', got '%s'", firstMessage["role"])
+				}
+				if firstMessage["content"] != systemPrompt {
+					t.Errorf("Expected system prompt content to be '%s', got '%s'", systemPrompt, firstMessage["content"])
+				}
+			},
+		},
+		{
+			name:     "Gemini",
+			provider: "gemini",
+			verifier: func(t *testing.T, r *http.Request) {
+				var reqBody map[string]interface{}
+				body, _ := io.ReadAll(r.Body)
+				if err := json.Unmarshal(body, &reqBody); err != nil {
+					t.Fatalf("Failed to unmarshal request body: %v", err)
+				}
+				sysInstruction, ok := reqBody["systemInstruction"].(map[string]interface{})
+				if !ok {
+					t.Fatal("Expected 'systemInstruction' field in request body")
+				}
+				parts := sysInstruction["parts"].([]interface{})
+				if len(parts) == 0 {
+					t.Fatal("Expected parts in systemInstruction, but got none")
+				}
+				firstPart := parts[0].(map[string]interface{})
+				if firstPart["text"] != systemPrompt {
+					t.Errorf("Expected system prompt text to be '%s', got '%s'", systemPrompt, firstPart["text"])
+				}
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Setup mock server
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				tc.verifier(t, r)
+				// Send back a minimal valid response to prevent client errors
+				w.Header().Set("Content-Type", "application/json")
+				switch tc.provider {
+				case "openai":
+					fmt.Fprint(w, `{"choices": [{"message": {"role": "assistant", "content": "OK"}}]}`)
+				case "gemini":
+					fmt.Fprint(w, `{"candidates": [{"content": {"role": "model", "parts": [{"text": "OK"}]}}]}`)
+				}
+			}))
+			defer server.Close()
+
+			// Setup client to use the mock server
+			client, err := ai.NewClient(
+				ai.WithProvider(tc.provider),
+				ai.WithAPIKey("test-key"),
+				ai.WithBaseURL(server.URL),
+			)
+			if err != nil {
+				t.Fatalf("Failed to create client: %v", err)
+			}
+
+			// Make the request
+			req := &ai.Request{
+				SystemPrompt: systemPrompt,
+				Messages: []ai.Message{
+					{Role: ai.RoleUser, Content: "Hello"},
+				},
+			}
+			_, err = client.Generate(context.Background(), req)
+			if err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+		})
+	}
 }
 
 // setupTestClient is a helper function to initialize the client for tests.

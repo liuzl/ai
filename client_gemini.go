@@ -146,6 +146,15 @@ func (c *geminiClient) newGeminiRequest(req *Request) (*geminiGenerateContentReq
 		}
 	}
 
+	// Add system prompt if provided
+	if req.SystemPrompt != "" {
+		geminiReq.SystemInstruction = &geminiContent{
+			Parts: []geminiPart{
+				{Text: &req.SystemPrompt},
+			},
+		}
+	}
+
 	return geminiReq, nil
 }
 
@@ -250,8 +259,9 @@ func (c *geminiClient) doJSONRequest(ctx context.Context, method, path string, r
 // --- Private Gemini Specific Types ---
 
 type geminiGenerateContentRequest struct {
-	Contents []geminiContent `json:"contents"`
-	Tools    []geminiTool    `json:"tools,omitempty"`
+	Contents          []geminiContent    `json:"contents"`
+	Tools             []geminiTool       `json:"tools,omitempty"`
+	SystemInstruction *geminiContent `json:"systemInstruction,omitempty"`
 }
 
 type geminiContent struct {
