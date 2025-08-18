@@ -104,7 +104,7 @@ func (c *openaiClient) newOpenAIRequest(req *Request) (*openaiChatCompletionRequ
 	// Prepend system prompt if provided
 	if req.SystemPrompt != "" {
 		openaiReq.Messages = append([]openaiMessage{
-			{Role: "system", Content: req.SystemPrompt},
+			{Role: string(RoleSystem), Content: req.SystemPrompt},
 		}, openaiReq.Messages...)
 	}
 
