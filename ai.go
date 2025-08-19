@@ -173,6 +173,8 @@ func NewClientFromEnv() (Client, error) {
 	if baseURL != "" {
 		opts = append(opts, WithBaseURL(baseURL))
 	}
+	// Add default 5 minute timeout
+	opts = append(opts, WithTimeout(5*time.Minute))
 
 	return NewClient(opts...)
 }
