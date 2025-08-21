@@ -1,23 +1,16 @@
 package ai
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"time"
 )
 
 // geminiClient implements the Client interface for the Google Gemini provider.
 type geminiClient struct {
-	apiKey     string
-	baseURL    string
-	apiVersion string
-	httpClient *http.Client
-	maxRetries int
+	b *baseClient
 }
 
 // newGeminiClient is the internal constructor for the Gemini client.
@@ -26,12 +19,11 @@ func newGeminiClient(cfg *Config) Client {
 	if cfg.baseURL != "" {
 		baseURL = cfg.baseURL
 	}
+	headers := make(http.Header)
+	headers.Set("x-goog-api-key", cfg.apiKey)
+
 	return &geminiClient{
-		apiKey:     cfg.apiKey,
-		baseURL:    baseURL,
-		apiVersion: "v1beta",
-		httpClient: &http.Client{Timeout: cfg.timeout},
-		maxRetries: 3,
+		b: newBaseClient(baseURL, "v1beta", cfg.timeout, headers, 3),
 	}
 }
 
@@ -195,65 +187,8 @@ func (c *geminiClient) toContentResponse(resp *geminiGenerateContentResponse) (*
 func (c *geminiClient) callGeminiAPI(ctx context.Context, model string, req *geminiGenerateContentRequest) (*geminiGenerateContentResponse, error) {
 	path := fmt.Sprintf("/models/%s:generateContent", model)
 	var resp geminiGenerateContentResponse
-	err := c.doJSONRequest(ctx, "POST", path, req, &resp)
+	err := c.b.doJSONRequest(ctx, "POST", path, req, &resp)
 	return &resp, err
-}
-
-// doJSONRequest is the core HTTP request helper for the Gemini client.
-func (c *geminiClient) doJSONRequest(ctx context.Context, method, path string, reqBody, respBody any) error {
-	var body io.Reader
-	if reqBody != nil {
-		jsonBody, err := json.Marshal(reqBody)
-		if err != nil {
-			return fmt.Errorf("failed to marshal request body: %w", err)
-		}
-		body = bytes.NewReader(jsonBody)
-	}
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
-		return fmt.Errorf("invalid base URL: %w", err)
-	}
-	u.Path, err = url.JoinPath(u.Path, c.apiVersion, path)
-	if err != nil {
-		return fmt.Errorf("failed to join URL path: %w", err)
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, method, u.String(), body)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-goog-api-key", c.apiKey)
-	var httpResp *http.Response
-	for attempt := range c.maxRetries {
-		httpResp, err = c.httpClient.Do(httpReq)
-		if err == nil && httpResp.StatusCode < 500 {
-			break
-		}
-		if attempt < c.maxRetries {
-			time.Sleep(1 * time.Second)
-		}
-	}
-	if err != nil {
-		return fmt.Errorf("request failed after %d attempts: %w", c.maxRetries+1, err)
-	}
-	defer httpResp.Body.Close()
-	respBodyBytes, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-	if httpResp.StatusCode >= 400 {
-		var apiError geminiErrorResponse
-		if err := json.Unmarshal(respBodyBytes, &apiError); err != nil {
-			return fmt.Errorf("HTTP %d: %s", httpResp.StatusCode, string(respBodyBytes))
-		}
-		return fmt.Errorf("API error %d: %s", httpResp.StatusCode, apiError.Error.Message)
-	}
-	if respBody != nil {
-		if err := json.Unmarshal(respBodyBytes, respBody); err != nil {
-			return fmt.Errorf("failed to unmarshal response: %w", err)
-		}
-	}
-	return nil
 }
 
 // --- Private Gemini Specific Types ---

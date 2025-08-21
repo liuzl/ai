@@ -195,7 +195,7 @@ func TestSystemPrompt(t *testing.T) {
 
 			// Setup client to use the mock server
 			client, err := ai.NewClient(
-				ai.WithProvider(tc.provider),
+				ai.WithProvider(ai.Provider(tc.provider)),
 				ai.WithAPIKey("test-key"),
 				ai.WithBaseURL(server.URL),
 			)
@@ -250,7 +250,7 @@ func setupTestClient(t *testing.T) (ai.Client, string) {
 	}
 
 	client, err := ai.NewClient(
-		ai.WithProvider(provider),
+		ai.WithProvider(ai.Provider(provider)),
 		ai.WithAPIKey(apiKey),
 		ai.WithBaseURL(baseURL),
 	)

@@ -1,23 +1,15 @@
 package ai
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
-	"time"
 )
 
 // openaiClient implements the Client interface for the OpenAI provider.
 type openaiClient struct {
-	apiKey     string
-	baseURL    string
-	apiVersion string
-	httpClient *http.Client
-	maxRetries int
+	b *baseClient
 }
 
 // newOpenAIClient is the internal constructor for the OpenAI client.
@@ -26,12 +18,11 @@ func newOpenAIClient(cfg *Config) Client {
 	if cfg.baseURL != "" {
 		baseURL = cfg.baseURL
 	}
+	headers := make(http.Header)
+	headers.Set("Authorization", "Bearer "+cfg.apiKey)
+
 	return &openaiClient{
-		apiKey:     cfg.apiKey,
-		baseURL:    baseURL,
-		apiVersion: "v1",
-		httpClient: &http.Client{Timeout: cfg.timeout},
-		maxRetries: 3,
+		b: newBaseClient(baseURL, "v1", cfg.timeout, headers, 3),
 	}
 }
 
@@ -141,68 +132,8 @@ func (c *openaiClient) toContentResponse(resp *openaiChatCompletionResponse) (*R
 // createChatCompletion is the internal method that calls the OpenAI API.
 func (c *openaiClient) createChatCompletion(ctx context.Context, req *openaiChatCompletionRequest) (*openaiChatCompletionResponse, error) {
 	var resp openaiChatCompletionResponse
-	err := c.doJSONRequest(ctx, "POST", "/chat/completions", req, &resp)
+	err := c.b.doJSONRequest(ctx, "POST", "/chat/completions", req, &resp)
 	return &resp, err
-}
-
-// doJSONRequest is the core HTTP request helper for the OpenAI client.
-func (c *openaiClient) doJSONRequest(ctx context.Context, method, path string, reqBody, respBody any) error {
-	// This implementation remains largely the same.
-	var body io.Reader
-	if reqBody != nil {
-		jsonBody, err := json.Marshal(reqBody)
-		if err != nil {
-			return fmt.Errorf("failed to marshal request body: %w", err)
-		}
-		body = bytes.NewReader(jsonBody)
-	}
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
-		return fmt.Errorf("invalid base URL: %w", err)
-	}
-	u.Path, err = url.JoinPath(u.Path, c.apiVersion, path)
-	if err != nil {
-		return fmt.Errorf("failed to join URL path: %w", err)
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, method, u.String(), body)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	var httpResp *http.Response
-	for attempt := range c.maxRetries {
-		httpResp, err = c.httpClient.Do(httpReq)
-		if err == nil && httpResp.StatusCode < 500 {
-			break // Success or non-retriable error
-		}
-		if attempt < c.maxRetries {
-			time.Sleep(1 * time.Second) // Wait before retrying
-		}
-	}
-	if err != nil {
-		return fmt.Errorf("request failed after %d attempts: %w", c.maxRetries+1, err)
-	}
-	defer httpResp.Body.Close()
-
-	respBodyBytes, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-	if httpResp.StatusCode >= 400 {
-		var apiError openaiErrorResponse
-		if err := json.Unmarshal(respBodyBytes, &apiError); err != nil {
-			return fmt.Errorf("HTTP %d: %s", httpResp.StatusCode, string(respBodyBytes))
-		}
-		return fmt.Errorf("API error %d: %s", httpResp.StatusCode, apiError.Error.Message)
-	}
-	if respBody != nil {
-		if err := json.Unmarshal(respBodyBytes, respBody); err != nil {
-			return fmt.Errorf("failed to unmarshal response: %w", err)
-		}
-	}
-	return nil
 }
 
 // --- Private OpenAI Specific Types ---

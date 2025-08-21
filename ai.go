@@ -11,6 +11,14 @@ import (
 
 // --- Public API ---
 
+// Provider defines the supported AI providers.
+type Provider string
+
+const (
+	ProviderOpenAI Provider = "openai"
+	ProviderGemini Provider = "gemini"
+)
+
 // Client is the unified interface for different AI providers.
 type Client interface {
 	Generate(ctx context.Context, req *Request) (*Response, error)
@@ -72,7 +80,7 @@ type ToolCall struct {
 
 // Config holds all possible Configuration options for any client.
 type Config struct {
-	provider string
+	provider Provider
 	apiKey   string
 	baseURL  string
 	model    string // Added model to the config
@@ -83,7 +91,7 @@ type Config struct {
 type Option func(*Config)
 
 // WithProvider sets the AI provider.
-func WithProvider(provider string) Option {
+func WithProvider(provider Provider) Option {
 	return func(c *Config) { c.provider = provider }
 }
 
@@ -122,13 +130,26 @@ func NewClient(opts ...Option) (Client, error) {
 	}
 
 	switch cfg.provider {
-	case "openai":
+	case ProviderOpenAI:
 		return newOpenAIClient(cfg), nil
-	case "gemini":
+	case ProviderGemini:
 		return newGeminiClient(cfg), nil
 	default:
 		return nil, fmt.Errorf("unknown provider: %q", cfg.provider)
 	}
+}
+
+// providerEnvConfig holds the environment variable names for a specific provider.
+type providerEnvConfig struct {
+	apiKey  string
+	model   string
+	baseURL string
+}
+
+// providerEnvs maps each provider to its corresponding environment variable configuration.
+var providerEnvs = map[Provider]providerEnvConfig{
+	ProviderOpenAI: {"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_BASE_URL"},
+	ProviderGemini: {"GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_BASE_URL"},
 }
 
 // NewClientFromEnv creates a new AI client by reading configuration from
@@ -140,31 +161,26 @@ func NewClient(opts ...Option) (Client, error) {
 //   - OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL
 //   - GEMINI_API_KEY, GEMINI_MODEL, GEMINI_BASE_URL
 func NewClientFromEnv() (Client, error) {
-	provider := os.Getenv("AI_PROVIDER")
-	if provider == "" {
-		provider = "openai" // Default to openai
+	providerStr := os.Getenv("AI_PROVIDER")
+	if providerStr == "" {
+		providerStr = "openai" // Default to openai
 	}
+	provider := Provider(strings.ToLower(providerStr))
 
-	var opts []Option
-	var apiKey, model, baseURL string
-
-	switch strings.ToLower(provider) {
-	case "openai":
-		apiKey = os.Getenv("OPENAI_API_KEY")
-		model = os.Getenv("OPENAI_MODEL")
-		baseURL = os.Getenv("OPENAI_BASE_URL")
-	case "gemini":
-		apiKey = os.Getenv("GEMINI_API_KEY")
-		model = os.Getenv("GEMINI_MODEL")
-		baseURL = os.Getenv("GEMINI_BASE_URL")
-	default:
+	env, ok := providerEnvs[provider]
+	if !ok {
 		return nil, fmt.Errorf("unsupported AI_PROVIDER: %s", provider)
 	}
 
+	apiKey := os.Getenv(env.apiKey)
 	if apiKey == "" {
-		return nil, fmt.Errorf("API key for provider '%s' is not set", provider)
+		return nil, fmt.Errorf("API key for provider '%s' is not set in env var %s", provider, env.apiKey)
 	}
 
+	model := os.Getenv(env.model)
+	baseURL := os.Getenv(env.baseURL)
+
+	var opts []Option
 	opts = append(opts, WithProvider(provider))
 	opts = append(opts, WithAPIKey(apiKey))
 	if model != "" {
