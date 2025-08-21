@@ -194,9 +194,9 @@ func (c *geminiClient) callGeminiAPI(ctx context.Context, model string, req *gem
 // --- Private Gemini Specific Types ---
 
 type geminiGenerateContentRequest struct {
-	Contents          []geminiContent    `json:"contents"`
-	Tools             []geminiTool       `json:"tools,omitempty"`
-	SystemInstruction *geminiContent `json:"systemInstruction,omitempty"`
+	Contents          []geminiContent `json:"contents"`
+	Tools             []geminiTool    `json:"tools,omitempty"`
+	SystemInstruction *geminiContent  `json:"systemInstruction,omitempty"`
 }
 
 type geminiContent struct {
@@ -236,10 +236,4 @@ type geminiGenerateContentResponse struct {
 
 type geminiCandidate struct {
 	Content geminiContent `json:"content"`
-}
-
-type geminiErrorResponse struct {
-	Error struct {
-		Message string `json:"message"`
-	} `json:"error"`
 }
