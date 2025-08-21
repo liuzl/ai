@@ -120,7 +120,9 @@ func newToolServerClientWithTransport(transport mcp.Transport) (*ToolServerClien
 	}, nil
 }
 
-// Connect establishes a session with the tool server.
+// Connect establishes a session with the tool server. It is optional to call
+// this manually; methods like FetchTools and ExecuteTool will call it
+// automatically if a session is not already active.
 func (c *ToolServerClient) Connect(ctx context.Context) error {
 	if c.session != nil {
 		return fmt.Errorf("session already established")
@@ -133,6 +135,14 @@ func (c *ToolServerClient) Connect(ctx context.Context) error {
 	return nil
 }
 
+// ensureConnected is an internal helper to establish a session if one doesn't exist.
+func (c *ToolServerClient) ensureConnected(ctx context.Context) error {
+	if c.session != nil {
+		return nil // Already connected
+	}
+	return c.Connect(ctx)
+}
+
 // Close terminates the session with the tool server.
 func (c *ToolServerClient) Close() error {
 	if c.session != nil {
@@ -143,10 +153,10 @@ func (c *ToolServerClient) Close() error {
 	return nil
 }
 
-// FetchTools lists available tools using the established session.
+// FetchTools lists available tools, automatically connecting if necessary.
 func (c *ToolServerClient) FetchTools(ctx context.Context) ([]Tool, error) {
-	if c.session == nil {
-		return nil, fmt.Errorf("not connected to tool server, call Connect() first")
+	if err := c.ensureConnected(ctx); err != nil {
+		return nil, err
 	}
 	mcpTools, err := c.session.ListTools(ctx, &mcp.ListToolsParams{})
 	if err != nil {
@@ -170,10 +180,10 @@ func (c *ToolServerClient) FetchTools(ctx context.Context) ([]Tool, error) {
 	return aiTools, nil
 }
 
-// ExecuteTool executes a tool call using the established session.
+// ExecuteTool executes a tool call, automatically connecting if necessary.
 func (c *ToolServerClient) ExecuteTool(ctx context.Context, toolCall ToolCall) (string, error) {
-	if c.session == nil {
-		return "", fmt.Errorf("not connected to tool server, call Connect() first")
+	if err := c.ensureConnected(ctx); err != nil {
+		return "", err
 	}
 	var args map[string]any
 	if err := json.Unmarshal([]byte(toolCall.Arguments), &args); err != nil {

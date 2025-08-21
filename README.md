@@ -122,43 +122,41 @@ const (
 func main() {
 	ctx := context.Background()
 
-	// 1. Setup MCP Manager and connect to the tool server
-	manager := ai.NewMCPManager()
+	// 1. Setup ToolServerManager and register the remote server.
+	manager := ai.NewToolServerManager()
 	if err := manager.AddRemoteServer(mcpServerName, mcpServerURL); err != nil {
-		log.Fatalf("Failed to add remote MCP server: %v", err)
+		log.Fatalf("Failed to add remote tool server: %v", err)
 	}
 
-	executor, _ := manager.GetExecutor(mcpServerName)
-	if err := executor.Connect(ctx); err != nil {
-		log.Fatalf("Failed to connect to MCP server: %v", err)
-	}
-	defer executor.Close()
+	// 2. Get the client for the server and defer its closing.
+	toolClient, _ := manager.GetClient(mcpServerName)
+	defer toolClient.Close()
 
-	// 2. Fetch available tools from the server
-	aiTools, err := executor.FetchTools(ctx)
+	// 3. Fetch available tools. The client will connect automatically.
+	aiTools, err := toolClient.FetchTools(ctx)
 	if err != nil {
 		log.Fatalf("Failed to fetch tools: %v", err)
 	}
 	log.Printf("Found %d tools on server '%s'.\n", len(aiTools), mcpServerName)
 
-	// 3. Create an AI client
-	client, err := ai.NewClientFromEnv()
+	// 4. Create an AI client
+	aiClient, err := ai.NewClientFromEnv()
 	if err != nil {
 		log.Fatalf("Failed to create AI client: %v", err)
 	}
 
-	// 4. Ask the model a question, making it aware of the tools
+	// 5. Ask the model a question, making it aware of the tools
 	messages := []ai.Message{
 		{Role: ai.RoleUser, Content: "List all files in the current directory using the shell."},
 	}
 	req := &ai.Request{Messages: messages, Tools: aiTools}
 
-	resp, err := client.Generate(ctx, req)
+	resp, err := aiClient.Generate(ctx, req)
 	if err != nil {
 		log.Fatalf("Initial model call failed: %v", err)
 	}
 
-	// 5. Check for a tool call and execute it
+	// 6. Check for a tool call and execute it
 	if len(resp.ToolCalls) == 0 {
 		log.Fatalf("Expected a tool call, but got text: %s", resp.Text)
 	}
@@ -166,28 +164,23 @@ func main() {
 	log.Printf("Model wants to call function '%s'.\n", toolCall.Function)
 	messages = append(messages, ai.Message{Role: ai.RoleAssistant, ToolCalls: resp.ToolCalls})
 
-	toolResult, err := executor.ExecuteTool(ctx, toolCall)
+	toolResult, err := toolClient.ExecuteTool(ctx, toolCall)
 	if err != nil {
-		log.Fatalf("MCP tool call failed: %v", err)
+		log.Fatalf("Tool call failed: %v", err)
 	}
 	log.Printf("Tool executed successfully.\n")
 
-	// 6. Send the result back to the model for a final answer
+	// 7. Send the result back to the model for a final answer
 	messages = append(messages, ai.Message{Role: ai.RoleTool, ToolCallID: toolCall.ID, Content: toolResult})
 	finalReq := &ai.Request{Messages: messages}
 
-	finalResp, err := client.Generate(ctx, finalReq)
+	finalResp, err := aiClient.Generate(ctx, finalReq)
 	if err != nil {
 		log.Fatalf("Final model call failed: %v", err)
 	}
 
-	// 7. Print the final, synthesized response
+	// 8. Print the final, synthesized response
 	log.Println("--- Final Model Response ---")
 	log.Println(finalResp.Text)
 	log.Println("--------------------------")
 }
-```
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).

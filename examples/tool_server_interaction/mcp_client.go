@@ -32,13 +32,10 @@ func main() {
 	if !ok {
 		log.Fatalf("Logic error: could not retrieve client after registering it.")
 	}
+	// Defer Close to ensure resources are cleaned up at the end.
+	defer client.Close()
 
-	// Connect the client to establish a session.
-	if err := client.Connect(ctx); err != nil {
-		log.Fatalf("Failed to connect to tool server '%s': %v", mcpServerName, err)
-	}
-	defer client.Close() // Ensure the session is closed.
-
+	// FetchTools will automatically connect on the first call.
 	log.Println("Fetching available tools from server...")
 	aiTools, err := client.FetchTools(ctx)
 	if err != nil {
