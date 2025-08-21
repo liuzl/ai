@@ -7,119 +7,174 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
-	"github.com/joho/godotenv"
 	"github.com/liuzl/ai"
 )
 
-// TestSimpleChat tests the basic text generation functionality.
+// TestSimpleChat tests the basic text generation functionality using a mock server.
 func TestSimpleChat(t *testing.T) {
-	client, model := setupTestClient(t)
-	if client == nil {
-		return // Skips test if client setup fails
-	}
-
-	req := &ai.Request{
-		Model: model,
-		Messages: []ai.Message{
-			{Role: ai.RoleUser, Content: "Tell me a one-sentence joke about programming."},
+	testCases := []struct {
+		name           string
+		provider       ai.Provider
+		mockResponse   string
+		expectedText   string
+		expectingError bool
+	}{
+		{
+			name:         "OpenAI",
+			provider:     ai.ProviderOpenAI,
+			mockResponse: `{"choices": [{"message": {"role": "assistant", "content": "Why did the scarecrow win an award? Because he was outstanding in his field!"}}]}`,
+			expectedText: "Why did the scarecrow win an award? Because he was outstanding in his field!",
+		},
+		{
+			name:         "Gemini",
+			provider:     ai.ProviderGemini,
+			mockResponse: `{"candidates": [{"content": {"role": "model", "parts": [{"text": "It's hard to explain puns to kleptomaniacs because they always take things literally."}]}}]}`,
+			expectedText: "It's hard to explain puns to kleptomaniacs because they always take things literally.",
 		},
 	}
 
-	resp, err := client.Generate(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
-	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, tc.mockResponse)
+			}))
+			defer server.Close()
 
-	if resp.Text == "" {
-		t.Fatal("Expected a non-empty text response, but got an empty string.")
-	}
-	if len(resp.ToolCalls) > 0 {
-		t.Fatalf("Expected no tool calls, but got %d", len(resp.ToolCalls))
-	}
+			client, err := ai.NewClient(
+				ai.WithProvider(tc.provider),
+				ai.WithAPIKey("test-key"),
+				ai.WithBaseURL(server.URL),
+			)
+			if err != nil {
+				t.Fatalf("Failed to create client: %v", err)
+			}
 
-	fmt.Printf("\n--- Simple Chat Test ---\n")
-	fmt.Printf("Provider: %s\n", os.Getenv("AI_PROVIDER"))
-	fmt.Printf("Response: %s\n", resp.Text)
-	fmt.Printf("------------------------\n")
+			req := &ai.Request{
+				Messages: []ai.Message{{Role: ai.RoleUser, Content: "Tell me a joke."}},
+			}
+
+			resp, err := client.Generate(context.Background(), req)
+			if err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+
+			if resp.Text != tc.expectedText {
+				t.Errorf("Expected response text '%s', but got '%s'", tc.expectedText, resp.Text)
+			}
+			if len(resp.ToolCalls) > 0 {
+				t.Errorf("Expected no tool calls, but got %d", len(resp.ToolCalls))
+			}
+		})
+	}
 }
 
-// TestFunctionCalling tests the tool calling functionality.
+// TestFunctionCalling tests the tool calling functionality using a mock server.
 func TestFunctionCalling(t *testing.T) {
-	client, model := setupTestClient(t)
-	if client == nil {
-		return
-	}
-
-	// 1. Define the tool
-	getCurrentWeatherTool := ai.Tool{
-		Type: "function",
-		Function: ai.FunctionDefinition{
-			Name:        "get_current_weather",
-			Description: "Get the current weather for a location",
-			Parameters:  json.RawMessage(`{"type": "object", "properties": {"location": {"type": "string", "description": "The city and state, e.g. San Francisco, CA"}}, "required": ["location"]}`),
+	testCases := []struct {
+		name                    string
+		provider                ai.Provider
+		mockToolCallResponse    string
+		mockFinalResponse       string
+		expectedFunctionName    string
+		expectedFunctionArgs    string
+		expectedFinalTextSubstr string
+	}{
+		{
+			name:                 "OpenAI",
+			provider:             ai.ProviderOpenAI,
+			mockToolCallResponse: `{"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "call_123", "type": "function", "function": {"name": "get_current_weather", "arguments": "{\"location\": \"Boston, MA\"}"}}]}}]}`,
+			mockFinalResponse:    `{"choices": [{"message": {"role": "assistant", "content": "The weather in Boston is 22 degrees Celsius."}}]}`,
+			expectedFunctionName: "get_current_weather",
+			expectedFunctionArgs: `{"location": "Boston, MA"}`,
+			expectedFinalTextSubstr: "22 degrees",
+		},
+		{
+			name:                 "Gemini",
+			provider:             ai.ProviderGemini,
+			mockToolCallResponse: `{"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "get_current_weather", "args": {"location": "Boston, MA"}}}]}}]}`,
+			mockFinalResponse:    `{"candidates": [{"content": {"role": "model", "parts": [{"text": "In Boston, it is currently 22 Celsius."}]}}]}`,
+			expectedFunctionName: "get_current_weather",
+			expectedFunctionArgs: `{"location":"Boston, MA"}`, // Note: JSON marshaling removes spaces
+			expectedFinalTextSubstr: "22 Celsius",
 		},
 	}
 
-	// 2. Initial request asking the model to use the tool
-	messages := []ai.Message{{Role: ai.RoleUser, Content: "What is the weather like in Boston, MA?"}}
-	req := &ai.Request{
-		Model:    model,
-		Messages: messages,
-		Tools:    []ai.Tool{getCurrentWeatherTool},
-	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			callCount := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if callCount == 0 {
+					fmt.Fprint(w, tc.mockToolCallResponse)
+				} else {
+					fmt.Fprint(w, tc.mockFinalResponse)
+				}
+				callCount++
+			}))
+			defer server.Close()
 
-	// 3. First call to the model
-	resp, err := client.Generate(context.Background(), req)
-	if err != nil {
-		t.Fatalf("First call failed: %v", err)
-	}
+			client, err := ai.NewClient(
+				ai.WithProvider(tc.provider),
+				ai.WithAPIKey("test-key"),
+				ai.WithBaseURL(server.URL),
+			)
+			if err != nil {
+				t.Fatalf("Failed to create client: %v", err)
+			}
 
-	if len(resp.ToolCalls) == 0 {
-		t.Fatalf("Expected tool calls, but got none. Response text: %s", resp.Text)
-	}
+			// 1. Initial request asking the model to use the tool
+			messages := []ai.Message{{Role: ai.RoleUser, Content: "What is the weather like in Boston, MA?"}}
+			tool := ai.Tool{
+				Type: "function",
+				Function: ai.FunctionDefinition{
+					Name:       "get_current_weather",
+					Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
+				},
+			}
+			req := &ai.Request{Messages: messages, Tools: []ai.Tool{tool}}
 
-	// 4. Append the assistant's request to the message history
-	messages = append(messages, ai.Message{Role: ai.RoleAssistant, ToolCalls: resp.ToolCalls})
+			// 2. First call to the model (should return a tool call)
+			resp, err := client.Generate(context.Background(), req)
+			if err != nil {
+				t.Fatalf("First call to Generate failed: %v", err)
+			}
+			if len(resp.ToolCalls) != 1 {
+				t.Fatalf("Expected 1 tool call, but got %d. Response text: %s", len(resp.ToolCalls), resp.Text)
+			}
 
-	// 5. Execute the tool and append the result
-	toolCall := resp.ToolCalls[0]
-	if toolCall.Function != "get_current_weather" {
-		t.Fatalf("Expected function call to 'get_current_weather', but got '%s'", toolCall.Function)
-	}
+			// 3. Verify the tool call
+			toolCall := resp.ToolCalls[0]
+			if toolCall.Function != tc.expectedFunctionName {
+				t.Errorf("Expected function name '%s', got '%s'", tc.expectedFunctionName, toolCall.Function)
+			}
+			if toolCall.Arguments != tc.expectedFunctionArgs {
+				t.Errorf("Expected function arguments '%s', got '%s'", tc.expectedFunctionArgs, toolCall.Arguments)
+			}
 
-	// Mock the function execution
-	weatherData := `{"temperature": "22", "unit": "celsius"}`
-	messages = append(messages, ai.Message{
-		Role:       ai.RoleTool,
-		ToolCallID: toolCall.ID,
-		Content:    weatherData,
-	})
+			// 4. Second call to the model with the (mocked) tool result
+			messages = append(messages, ai.Message{Role: ai.RoleAssistant, ToolCalls: resp.ToolCalls})
+			messages = append(messages, ai.Message{
+				Role:       ai.RoleTool,
+				ToolCallID: toolCall.ID,
+				Content:    `{"temperature": "22", "unit": "celsius"}`,
+			})
+			finalReq := &ai.Request{Messages: messages}
 
-	// 6. Second call to the model with the tool result
-	finalReq := &ai.Request{
-		Model:    model,
-		Messages: messages,
-	}
-	finalResp, err := client.Generate(context.Background(), finalReq)
-	if err != nil {
-		t.Fatalf("Second call failed: %v", err)
-	}
+			finalResp, err := client.Generate(context.Background(), finalReq)
+			if err != nil {
+				t.Fatalf("Second call to Generate failed: %v", err)
+			}
 
-	if finalResp.Text == "" {
-		t.Fatal("Expected a final text response, but got an empty string.")
+			// 5. Verify the final response
+			if !strings.Contains(finalResp.Text, tc.expectedFinalTextSubstr) {
+				t.Errorf("Expected final response to contain '%s', but got: %s", tc.expectedFinalTextSubstr, finalResp.Text)
+			}
+		})
 	}
-	if !strings.Contains(finalResp.Text, "22") {
-		t.Errorf("Expected final response to contain the weather data '22', but it didn't. Got: %s", finalResp.Text)
-	}
-
-	fmt.Printf("\n--- Function Calling Test ---\n")
-	fmt.Printf("Provider: %s\n", os.Getenv("AI_PROVIDER"))
-	fmt.Printf("Final Response: %s\n", finalResp.Text)
-	fmt.Printf("---------------------------\n")
 }
 
 // TestSystemPrompt verifies that the system prompt is sent correctly for each provider.
@@ -127,12 +182,12 @@ func TestSystemPrompt(t *testing.T) {
 	systemPrompt := "You are a helpful assistant."
 	testCases := []struct {
 		name     string
-		provider string
+		provider ai.Provider
 		verifier func(t *testing.T, r *http.Request)
 	}{
 		{
 			name:     "OpenAI",
-			provider: "openai",
+			provider: ai.ProviderOpenAI,
 			verifier: func(t *testing.T, r *http.Request) {
 				var reqBody map[string]interface{}
 				body, _ := io.ReadAll(r.Body)
@@ -140,8 +195,8 @@ func TestSystemPrompt(t *testing.T) {
 					t.Fatalf("Failed to unmarshal request body: %v", err)
 				}
 				messages := reqBody["messages"].([]interface{})
-				if len(messages) == 0 {
-					t.Fatal("Expected messages, but got none")
+				if len(messages) < 2 { // System + User
+					t.Fatalf("Expected at least 2 messages, but got %d", len(messages))
 				}
 				firstMessage := messages[0].(map[string]interface{})
 				if firstMessage["role"] != "system" {
@@ -154,7 +209,7 @@ func TestSystemPrompt(t *testing.T) {
 		},
 		{
 			name:     "Gemini",
-			provider: "gemini",
+			provider: ai.ProviderGemini,
 			verifier: func(t *testing.T, r *http.Request) {
 				var reqBody map[string]interface{}
 				body, _ := io.ReadAll(r.Body)
@@ -179,23 +234,20 @@ func TestSystemPrompt(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Setup mock server
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				tc.verifier(t, r)
-				// Send back a minimal valid response to prevent client errors
 				w.Header().Set("Content-Type", "application/json")
 				switch tc.provider {
-				case "openai":
+				case ai.ProviderOpenAI:
 					fmt.Fprint(w, `{"choices": [{"message": {"role": "assistant", "content": "OK"}}]}`)
-				case "gemini":
+				case ai.ProviderGemini:
 					fmt.Fprint(w, `{"candidates": [{"content": {"role": "model", "parts": [{"text": "OK"}]}}]}`)
 				}
 			}))
 			defer server.Close()
 
-			// Setup client to use the mock server
 			client, err := ai.NewClient(
-				ai.WithProvider(ai.Provider(tc.provider)),
+				ai.WithProvider(tc.provider),
 				ai.WithAPIKey("test-key"),
 				ai.WithBaseURL(server.URL),
 			)
@@ -203,12 +255,9 @@ func TestSystemPrompt(t *testing.T) {
 				t.Fatalf("Failed to create client: %v", err)
 			}
 
-			// Make the request
 			req := &ai.Request{
 				SystemPrompt: systemPrompt,
-				Messages: []ai.Message{
-					{Role: ai.RoleUser, Content: "Hello"},
-				},
+				Messages:     []ai.Message{{Role: ai.RoleUser, Content: "Hello"}},
 			}
 			_, err = client.Generate(context.Background(), req)
 			if err != nil {
@@ -216,46 +265,4 @@ func TestSystemPrompt(t *testing.T) {
 			}
 		})
 	}
-}
-
-// setupTestClient is a helper function to initialize the client for tests.
-func setupTestClient(t *testing.T) (ai.Client, string) {
-	t.Helper()
-	if err := godotenv.Load(); err != nil {
-		t.Log("No .env file found, reading from environment variables")
-	}
-
-	provider := os.Getenv("AI_PROVIDER")
-	if provider == "" {
-		provider = "openai" // Default to openai
-	}
-
-	var apiKey, model, baseURL string
-	switch provider {
-	case "openai":
-		apiKey = os.Getenv("OPENAI_API_KEY")
-		model = os.Getenv("OPENAI_MODEL")
-		baseURL = os.Getenv("OPENAI_BASE_URL")
-	case "gemini":
-		apiKey = os.Getenv("GEMINI_API_KEY")
-		model = os.Getenv("GEMINI_MODEL")
-		baseURL = os.Getenv("GEMINI_BASE_URL")
-	default:
-		t.Fatalf("Unsupported AI_PROVIDER: %s", provider)
-	}
-
-	if apiKey == "" {
-		t.Skipf("API key for %s not set, skipping test", provider)
-		return nil, ""
-	}
-
-	client, err := ai.NewClient(
-		ai.WithProvider(ai.Provider(provider)),
-		ai.WithAPIKey(apiKey),
-		ai.WithBaseURL(baseURL),
-	)
-	if err != nil {
-		t.Fatalf("NewClient failed: %v", err)
-	}
-	return client, model
 }
