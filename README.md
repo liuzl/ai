@@ -45,6 +45,7 @@ The easiest way to configure the client is by setting environment variables. The
 This example shows how to create a client from environment variables and generate a simple text response.
 
 ```go
+// main.go
 package main
 
 import (
@@ -52,33 +53,43 @@ import (
 	"fmt"
 	"log"
 
-	_ "github.com/joho/godotenv/autoload" // for loading .env file
+	// Use godotenv to load .env file for local development
+	_ "github.com/joho/godotenv/autoload"
 	"github.com/liuzl/ai"
 )
 
 func main() {
-	// 1. Create a new client from environment variables
+	// Create a new client using the recommended NewClientFromEnv function.
+	// This automatically reads the AI_PROVIDER and corresponding API keys.
 	client, err := ai.NewClientFromEnv()
 	if err != nil {
 		log.Fatalf("Failed to create AI client: %v", err)
 	}
 
-	// 2. Create a request
+	// Create a request for the model.
 	req := &ai.Request{
 		Messages: []ai.Message{
-			{Role: ai.RoleUser, Content: "What is the weather like in San Francisco?"},
+			{Role: ai.RoleUser, Content: "Tell me a one-sentence joke about programming."},
 		},
 	}
 
-	// 3. Generate the response
+	// Call the Generate function.
 	resp, err := client.Generate(context.Background(), req)
 	if err != nil {
-		log.Fatalf("Failed to generate content: %v", err)
+		log.Fatalf("Generate failed: %v", err)
 	}
 
-	// 4. Print the result
-	fmt.Println("AI Response:", resp.Text)
+	// Print the result.
+	fmt.Println(resp.Text)
 }
+```
+
+### Running the Examples
+
+The `examples` directory contains runnable code. To run the simple chat example, execute the following command from the root of the project:
+
+```sh
+go run ./examples/simple_chat
 ```
 
 ### Advanced Example: Using Tools with an MCP Server
