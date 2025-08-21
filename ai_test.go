@@ -84,21 +84,21 @@ func TestFunctionCalling(t *testing.T) {
 		expectedFinalTextSubstr string
 	}{
 		{
-			name:                 "OpenAI",
-			provider:             ai.ProviderOpenAI,
-			mockToolCallResponse: `{"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "call_123", "type": "function", "function": {"name": "get_current_weather", "arguments": "{\"location\": \"Boston, MA\"}"}}]}}]}`,
-			mockFinalResponse:    `{"choices": [{"message": {"role": "assistant", "content": "The weather in Boston is 22 degrees Celsius."}}]}`,
-			expectedFunctionName: "get_current_weather",
-			expectedFunctionArgs: `{"location": "Boston, MA"}`,
+			name:                    "OpenAI",
+			provider:                ai.ProviderOpenAI,
+			mockToolCallResponse:    `{"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "call_123", "type": "function", "function": {"name": "get_current_weather", "arguments": "{\"location\": \"Boston, MA\"}"}}]}}]}`,
+			mockFinalResponse:       `{"choices": [{"message": {"role": "assistant", "content": "The weather in Boston is 22 degrees Celsius."}}]}`,
+			expectedFunctionName:    "get_current_weather",
+			expectedFunctionArgs:    `{"location": "Boston, MA"}`,
 			expectedFinalTextSubstr: "22 degrees",
 		},
 		{
-			name:                 "Gemini",
-			provider:             ai.ProviderGemini,
-			mockToolCallResponse: `{"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "get_current_weather", "args": {"location": "Boston, MA"}}}]}}]}`,
-			mockFinalResponse:    `{"candidates": [{"content": {"role": "model", "parts": [{"text": "In Boston, it is currently 22 Celsius."}]}}]}`,
-			expectedFunctionName: "get_current_weather",
-			expectedFunctionArgs: `{"location":"Boston, MA"}`, // Note: JSON marshaling removes spaces
+			name:                    "Gemini",
+			provider:                ai.ProviderGemini,
+			mockToolCallResponse:    `{"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "get_current_weather", "args": {"location": "Boston, MA"}}}]}}]}`,
+			mockFinalResponse:       `{"candidates": [{"content": {"role": "model", "parts": [{"text": "In Boston, it is currently 22 Celsius."}]}}]}`,
+			expectedFunctionName:    "get_current_weather",
+			expectedFunctionArgs:    `{"location":"Boston, MA"}`, // Note: JSON marshaling removes spaces
 			expectedFinalTextSubstr: "22 Celsius",
 		},
 	}
@@ -264,5 +264,73 @@ func TestSystemPrompt(t *testing.T) {
 				t.Fatalf("Generate failed: %v", err)
 			}
 		})
+	}
+}
+
+// TestMultiToolFunctionCalling verifies that the Gemini client can handle a response
+// containing multiple tool calls in a single turn.
+func TestMultiToolFunctionCalling(t *testing.T) {
+	mockResponse := `{
+		"candidates": [{
+			"content": {
+				"role": "model",
+				"parts": [
+					{"functionCall": {"name": "get_weather", "args": {"location": "Boston, MA"}}},
+					{"functionCall": {"name": "get_weather", "args": {"location": "New York, NY"}}}
+				]
+			}
+		}]
+	}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, mockResponse)
+	}))
+	defer server.Close()
+
+	client, err := ai.NewClient(
+		ai.WithProvider(ai.ProviderGemini),
+		ai.WithAPIKey("test-key"),
+		ai.WithBaseURL(server.URL),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	req := &ai.Request{
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: "What's the weather in Boston and New York?"}},
+	}
+
+	resp, err := client.Generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	if len(resp.ToolCalls) != 2 {
+		t.Fatalf("Expected 2 tool calls, but got %d", len(resp.ToolCalls))
+	}
+
+	if resp.ToolCalls[0].Function != "get_weather" {
+		t.Errorf("Expected first tool call to be 'get_weather', got '%s'", resp.ToolCalls[0].Function)
+	}
+	if !strings.Contains(resp.ToolCalls[0].Arguments, "Boston, MA") {
+		t.Errorf("Expected first tool call args to contain 'Boston, MA', got '%s'", resp.ToolCalls[0].Arguments)
+	}
+
+	if resp.ToolCalls[1].Function != "get_weather" {
+		t.Errorf("Expected second tool call to be 'get_weather', got '%s'", resp.ToolCalls[1].Function)
+	}
+	if !strings.Contains(resp.ToolCalls[1].Arguments, "New York, NY") {
+		t.Errorf("Expected second tool call args to contain 'New York, NY', got '%s'", resp.ToolCalls[1].Arguments)
+	}
+
+	if resp.ToolCalls[0].ID == resp.ToolCalls[1].ID {
+		t.Errorf("Expected tool call IDs to be unique, but both were '%s'", resp.ToolCalls[0].ID)
+	}
+	if !strings.HasSuffix(resp.ToolCalls[0].ID, "-0") {
+		t.Errorf("Expected first ID to end with '-0', got '%s'", resp.ToolCalls[0].ID)
+	}
+	if !strings.HasSuffix(resp.ToolCalls[1].ID, "-1") {
+		t.Errorf("Expected second ID to end with '-1', got '%s'", resp.ToolCalls[1].ID)
 	}
 }

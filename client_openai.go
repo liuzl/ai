@@ -180,9 +180,3 @@ type openaiChatCompletionResponse struct {
 type openaiChoice struct {
 	Message openaiMessage `json:"message"`
 }
-
-type openaiErrorResponse struct {
-	Error struct {
-		Message string `json:"message"`
-	} `json:"error"`
-}

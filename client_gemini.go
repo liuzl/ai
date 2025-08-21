@@ -158,25 +158,25 @@ func (c *geminiClient) toContentResponse(resp *geminiGenerateContentResponse) (*
 
 	candidate := resp.Candidates[0]
 	universalResp := &Response{}
+	timestamp := time.Now().UnixNano() // Use a single timestamp for the whole response
 
-	if len(candidate.Content.Parts) > 0 {
-		part := candidate.Content.Parts[0]
+	for i, part := range candidate.Content.Parts {
 		if part.Text != nil {
-			universalResp.Text = *part.Text
+			universalResp.Text += *part.Text
 		}
 		if part.FunctionCall != nil {
 			args, err := json.Marshal(part.FunctionCall.Args)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal gemini function call args: %w", err)
 			}
-			universalResp.ToolCalls = []ToolCall{
-				{
-					ID:        fmt.Sprintf("gemini-tool-call-%d", time.Now().UnixNano()),
-					Type:      "function",
-					Function:  part.FunctionCall.Name,
-					Arguments: string(args),
-				},
+			toolCall := ToolCall{
+				// ID is unique within this response by using the loop index.
+				ID:        fmt.Sprintf("gemini-tool-call-%d-%d", timestamp, i),
+				Type:      "function",
+				Function:  part.FunctionCall.Name,
+				Arguments: string(args),
 			}
+			universalResp.ToolCalls = append(universalResp.ToolCalls, toolCall)
 		}
 	}
 
