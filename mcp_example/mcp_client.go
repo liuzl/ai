@@ -18,29 +18,29 @@ const (
 func main() {
 	ctx := context.Background()
 
-	// --- 1. Setup MCP Manager and Register the Remote Server ---
-	log.Println("Initializing MCP Manager...")
-	manager := ai.NewMCPManager()
+	// --- 1. Setup Tool Server Manager and Register the Remote Server ---
+	log.Println("Initializing Tool Server Manager...")
+	manager := ai.NewToolServerManager()
 	if err := manager.AddRemoteServer(mcpServerName, mcpServerURL); err != nil {
-		log.Fatalf("Failed to add remote MCP server: %v", err)
+		log.Fatalf("Failed to add remote tool server: %v", err)
 	}
 	log.Printf("Successfully registered remote server '%s' at %s", mcpServerName, mcpServerURL)
 
 	// --- 2. Fetch Tools from the Registered Server ---
-	// Get the executor for our server.
-	executor, ok := manager.GetExecutor(mcpServerName)
+	// Get the client for our server.
+	client, ok := manager.GetClient(mcpServerName)
 	if !ok {
-		log.Fatalf("Logic error: could not retrieve executor after registering it.")
+		log.Fatalf("Logic error: could not retrieve client after registering it.")
 	}
 
-	// Connect the executor to establish a session.
-	if err := executor.Connect(ctx); err != nil {
-		log.Fatalf("Failed to connect to MCP server '%s': %v", mcpServerName, err)
+	// Connect the client to establish a session.
+	if err := client.Connect(ctx); err != nil {
+		log.Fatalf("Failed to connect to tool server '%s': %v", mcpServerName, err)
 	}
-	defer executor.Close() // Ensure the session is closed.
+	defer client.Close() // Ensure the session is closed.
 
 	log.Println("Fetching available tools from server...")
-	aiTools, err := executor.FetchTools(ctx)
+	aiTools, err := client.FetchTools(ctx)
 	if err != nil {
 		log.Fatalf("Failed to fetch tools: %v", err)
 	}
@@ -55,7 +55,7 @@ func main() {
 
 	// --- 3. Setup AI Client ---
 	log.Println("Initializing AI client from environment variables...")
-	client, err := ai.NewClientFromEnv()
+	aiClient, err := ai.NewClientFromEnv()
 	if err != nil {
 		log.Fatalf("Failed to create AI client: %v", err)
 	}
@@ -68,32 +68,32 @@ func main() {
 	req := &ai.Request{Messages: messages, Tools: aiTools}
 
 	log.Println("Sending initial request to the model...")
-	resp, err := client.Generate(ctx, req)
+	authResp, err := aiClient.Generate(ctx, req)
 	if err != nil {
 		log.Fatalf("Initial model call failed: %v", err)
 	}
 
-	if len(resp.ToolCalls) == 0 {
-		log.Fatalf("Expected a tool call, but got a text response: %s", resp.Text)
+	if len(authResp.ToolCalls) == 0 {
+		log.Fatalf("Expected a tool call, but got a text response: %s", authResp.Text)
 	}
-	toolCall := resp.ToolCalls[0]
-	log.Printf("Model wants to call the '%s' function with arguments: %s\n", toolCall.Function, toolCall.Arguments)
-	messages = append(messages, ai.Message{Role: ai.RoleAssistant, ToolCalls: resp.ToolCalls})
+	authToolCall := authResp.ToolCalls[0]
+	log.Printf("Model wants to call the '%s' function with arguments: %s\n", authToolCall.Function, authToolCall.Arguments)
+	messages = append(messages, ai.Message{Role: ai.RoleAssistant, ToolCalls: authResp.ToolCalls})
 
-	// --- 5. Execute the Tool via the Same Executor ---
-	// No need to reconnect; the executor maintains the session.
-	toolResult, err := executor.ExecuteTool(ctx, toolCall)
+	// --- 5. Execute the Tool via the Same Client ---
+	// No need to reconnect; the client maintains the session.
+	authToolResult, err := client.ExecuteTool(ctx, authToolCall)
 	if err != nil {
-		log.Fatalf("MCP tool call failed: %v", err)
+		log.Fatalf("Tool call failed: %v", err)
 	}
-	log.Printf("Received result from MCP server: %s\n", toolResult)
+	log.Printf("Received result from tool server: %s\n", authToolResult)
 
 	// --- 6. Send the Result Back to the Model ---
-	messages = append(messages, ai.Message{Role: ai.RoleTool, ToolCallID: toolCall.ID, Content: toolResult})
+	messages = append(messages, ai.Message{Role: ai.RoleTool, ToolCallID: authToolCall.ID, Content: authToolResult})
 	finalReq := &ai.Request{Messages: messages}
 
 	log.Println("Sending tool result back to the model for a final answer...")
-	finalResp, err := client.Generate(ctx, finalReq)
+	finalResp, err := aiClient.Generate(ctx, finalReq)
 	if err != nil {
 		log.Fatalf("Final model call failed: %v", err)
 	}
