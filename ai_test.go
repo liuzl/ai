@@ -324,14 +324,11 @@ func TestMultiToolFunctionCalling(t *testing.T) {
 		t.Errorf("Expected second tool call args to contain 'New York, NY', got '%s'", resp.ToolCalls[1].Arguments)
 	}
 
+	if resp.ToolCalls[0].ID == "" || resp.ToolCalls[1].ID == "" {
+		t.Errorf("Expected tool call IDs to be non-empty")
+	}
 	if resp.ToolCalls[0].ID == resp.ToolCalls[1].ID {
 		t.Errorf("Expected tool call IDs to be unique, but both were '%s'", resp.ToolCalls[0].ID)
-	}
-	if !strings.HasSuffix(resp.ToolCalls[0].ID, "-0") {
-		t.Errorf("Expected first ID to end with '-0', got '%s'", resp.ToolCalls[0].ID)
-	}
-	if !strings.HasSuffix(resp.ToolCalls[1].ID, "-1") {
-		t.Errorf("Expected second ID to end with '-1', got '%s'", resp.ToolCalls[1].ID)
 	}
 }
 

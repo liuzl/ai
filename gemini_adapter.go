@@ -1,9 +1,10 @@
 package ai
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"time"
 )
 
 // geminiAdapter implements the providerAdapter interface for Google Gemini.
@@ -123,16 +124,12 @@ func (a *geminiAdapter) parseResponse(providerResp []byte) (*Response, error) {
 	if err := json.Unmarshal(providerResp, &geminiResp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal gemini response: %w", err)
 	}
-
 	if len(geminiResp.Candidates) == 0 {
 		return &Response{}, nil
 	}
-
 	candidate := geminiResp.Candidates[0]
 	universalResp := &Response{}
-	timestamp := time.Now().UnixNano()
-
-	for i, part := range candidate.Content.Parts {
+	for _, part := range candidate.Content.Parts {
 		if part.Text != nil {
 			universalResp.Text += *part.Text
 		}
@@ -141,8 +138,14 @@ func (a *geminiAdapter) parseResponse(providerResp []byte) (*Response, error) {
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal gemini function call args: %w", err)
 			}
+			// Gemini API does not provide a tool_call_id, so we generate one.
+			// Using crypto/rand for a secure random ID.
+			randBytes := make([]byte, 8)
+			if _, err := rand.Read(randBytes); err != nil {
+				return nil, fmt.Errorf("failed to generate random tool call ID: %w", err)
+			}
 			toolCall := ToolCall{
-				ID:        fmt.Sprintf("gemini-tool-call-%d-%d", timestamp, i),
+				ID:        "gemini-tool-call-" + hex.EncodeToString(randBytes),
 				Type:      "function",
 				Function:  part.FunctionCall.Name,
 				Arguments: string(args),
@@ -150,7 +153,6 @@ func (a *geminiAdapter) parseResponse(providerResp []byte) (*Response, error) {
 			universalResp.ToolCalls = append(universalResp.ToolCalls, toolCall)
 		}
 	}
-
 	return universalResp, nil
 }
 
