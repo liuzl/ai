@@ -334,3 +334,103 @@ func TestMultiToolFunctionCalling(t *testing.T) {
 		t.Errorf("Expected second ID to end with '-1', got '%s'", resp.ToolCalls[1].ID)
 	}
 }
+
+// TestAnthropicImplementation tests the Anthropic provider against a mock server,
+// covering both simple chat and tool calling.
+func TestAnthropicImplementation(t *testing.T) {
+	mockSimpleResponse := `{
+		"content": [{"type": "text", "text": "Hello! How can I help you today?"}],
+		"stop_reason": "end_turn"
+	}`
+	mockToolCallResponse := `{
+		"content": [
+			{
+				"type": "tool_use",
+				"id": "toolu_01A09q90qw90lq917835lq9",
+				"name": "get_stock_price",
+				"input": {"ticker": "GOOG"}
+			}
+		],
+		"stop_reason": "tool_use"
+	}`
+
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify headers
+		if r.Header.Get("x-api-key") != "test-key" {
+			t.Error("Expected x-api-key header was not found")
+		}
+		if r.Header.Get("anthropic-version") == "" {
+			t.Error("Expected anthropic-version header was not found")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if callCount == 0 {
+			fmt.Fprint(w, mockSimpleResponse)
+		} else {
+			fmt.Fprint(w, mockToolCallResponse)
+		}
+		callCount++
+	}))
+	defer server.Close()
+
+	client, err := ai.NewClient(
+		ai.WithProvider(ai.ProviderAnthropic),
+		ai.WithAPIKey("test-key"),
+		ai.WithBaseURL(server.URL),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	// --- Test 1: Simple Chat ---
+	t.Run("Simple Chat", func(t *testing.T) {
+		req := &ai.Request{
+			Messages: []ai.Message{{Role: ai.RoleUser, Content: "Hello"}},
+		}
+		resp, err := client.Generate(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Simple chat generate failed: %v", err)
+		}
+		expectedText := "Hello! How can I help you today?"
+		if resp.Text != expectedText {
+			t.Errorf("Expected text '%s', got '%s'", expectedText, resp.Text)
+		}
+		if len(resp.ToolCalls) > 0 {
+			t.Errorf("Expected no tool calls, but got %d", len(resp.ToolCalls))
+		}
+	})
+
+	// --- Test 2: Tool Calling ---
+	t.Run("Tool Calling", func(t *testing.T) {
+		tool := ai.Tool{
+			Type: "function",
+			Function: ai.FunctionDefinition{
+				Name:       "get_stock_price",
+				Parameters: json.RawMessage(`{"type": "object", "properties": {"ticker": {"type": "string"}}}`),
+			},
+		}
+		req := &ai.Request{
+			Messages: []ai.Message{{Role: ai.RoleUser, Content: "What's the price of GOOG?"}},
+			Tools:    []ai.Tool{tool},
+		}
+		resp, err := client.Generate(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Tool call generate failed: %v", err)
+		}
+		if len(resp.ToolCalls) != 1 {
+			t.Fatalf("Expected 1 tool call, got %d", len(resp.ToolCalls))
+		}
+		toolCall := resp.ToolCalls[0]
+		if toolCall.Function != "get_stock_price" {
+			t.Errorf("Expected function name 'get_stock_price', got '%s'", toolCall.Function)
+		}
+		expectedArgs := `{"ticker":"GOOG"}`
+		if toolCall.Arguments != expectedArgs {
+			t.Errorf("Expected args '%s', got '%s'", expectedArgs, toolCall.Arguments)
+		}
+		if toolCall.ID == "" {
+			t.Error("Expected a non-empty tool call ID")
+		}
+	})
+}

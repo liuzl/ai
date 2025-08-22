@@ -15,8 +15,9 @@ import (
 type Provider string
 
 const (
-	ProviderOpenAI Provider = "openai"
-	ProviderGemini Provider = "gemini"
+	ProviderOpenAI    Provider = "openai"
+	ProviderGemini    Provider = "gemini"
+	ProviderAnthropic Provider = "anthropic"
 )
 
 // Client is the unified interface for different AI providers.
@@ -133,6 +134,8 @@ func NewClient(opts ...Option) (Client, error) {
 		return newOpenAIClient(cfg), nil
 	case ProviderGemini:
 		return newGeminiClient(cfg), nil
+	case ProviderAnthropic:
+		return newAnthropicClient(cfg), nil
 	default:
 		return nil, fmt.Errorf("unknown provider: %q", cfg.provider)
 	}
@@ -147,8 +150,9 @@ type providerEnvConfig struct {
 
 // providerEnvs maps each provider to its corresponding environment variable configuration.
 var providerEnvs = map[Provider]providerEnvConfig{
-	ProviderOpenAI: {"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_BASE_URL"},
-	ProviderGemini: {"GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_BASE_URL"},
+	ProviderOpenAI:    {"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_BASE_URL"},
+	ProviderGemini:    {"GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_BASE_URL"},
+	ProviderAnthropic: {"ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_BASE_URL"},
 }
 
 // NewClientFromEnv creates a new AI client by reading configuration from
