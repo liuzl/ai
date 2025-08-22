@@ -63,7 +63,7 @@ func (c *geminiClient) newGeminiRequest(req *Request) (*geminiGenerateContentReq
 			if msg.Content != "" {
 				parts = append(parts, geminiPart{Text: &msg.Content})
 			}
-		case RoleAssistant, RoleModel:
+		case RoleAssistant:
 			role = "model"
 			if msg.Content != "" {
 				parts = append(parts, geminiPart{Text: &msg.Content})

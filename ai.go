@@ -46,7 +46,6 @@ const (
 	RoleUser      Role = "user"
 	RoleAssistant Role = "assistant"
 	RoleTool      Role = "tool"
-	RoleModel     Role = "model"
 )
 
 // Message represents a universal message structure.
