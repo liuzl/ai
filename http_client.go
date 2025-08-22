@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"time"
@@ -38,7 +39,7 @@ func newBaseClient(baseURL, apiVersion string, timeout time.Duration, headers ht
 }
 
 // doRequestRaw performs an HTTP request and returns the raw response body bytes.
-// It handles retries on 5xx server errors.
+// It handles retries with exponential backoff and jitter on 5xx server errors.
 func (c *baseClient) doRequestRaw(ctx context.Context, method, path string, reqBody any) ([]byte, error) {
 	var body io.Reader
 	if reqBody != nil {
@@ -65,13 +66,23 @@ func (c *baseClient) doRequestRaw(ctx context.Context, method, path string, reqB
 	httpReq.Header = c.headers
 
 	var httpResp *http.Response
-	for attempt := 0; attempt < c.maxRetries; attempt++ {
+	baseDelay := 1 * time.Second
+	maxDelay := 30 * time.Second
+	for attempt := range c.maxRetries {
 		httpResp, err = c.httpClient.Do(httpReq)
 		if err == nil && httpResp.StatusCode < 500 {
 			break // Success or non-retriable error
 		}
 		if attempt < c.maxRetries-1 {
-			time.Sleep(1 * time.Second) // Wait before retrying
+			// Calculate backoff duration
+			backoff := baseDelay * (1 << attempt) // 2^attempt
+			if backoff > maxDelay {
+				backoff = maxDelay
+			}
+			// Add jitter (randomness) to avoid thundering herd
+			jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
+			sleepDuration := backoff + jitter
+			time.Sleep(sleepDuration)
 		}
 	}
 	if err != nil {
