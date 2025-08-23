@@ -1,12 +1,12 @@
 # Go AI
 
-A Go library providing a unified, provider-agnostic interface for interacting with multiple AI models, including Google Gemini and OpenAI. This library simplifies content generation and tool integration, allowing you to switch between AI providers with minimal code changes.
+A Go library providing a unified, provider-agnostic interface for interacting with multiple AI models, including Google Gemini, OpenAI, and Anthropic. This library simplifies content generation and tool integration, allowing you to switch between AI providers with minimal code changes.
 
 It also features built-in support for the [Model-Context Protocol (MCP)](https://github.com/modelcontextprotocol), enabling seamless integration with external tool servers.
 
 ## Features
 
-- **Unified Client Interface**: A single `ai.Client` interface for both Google Gemini and OpenAI.
+- **Unified Client Interface**: A single `ai.Client` interface for Google Gemini, OpenAI, and Anthropic.
 - **Provider-Agnostic API**: Universal `Request`, `Response`, and `Message` structs for consistent interaction.
 - **Simplified Configuration**: Easily configure clients using environment variables or functional options.
 - **First-Class Tool Support**: Abstracted support for function calling (tools) that works across providers.
@@ -24,7 +24,7 @@ go get github.com/liuzl/ai
 
 The easiest way to configure the client is by setting environment variables. The library's `NewClientFromEnv()` function will automatically detect and use them.
 
-- `AI_PROVIDER`: The provider to use. Can be `openai` (default) or `gemini`.
+- `AI_PROVIDER`: The provider to use. Can be `openai` (default), `gemini`, or `anthropic`.
 
 ### OpenAI
 
@@ -37,6 +37,12 @@ The easiest way to configure the client is by setting environment variables. The
 - `GEMINI_API_KEY`: Your Gemini API key.
 - `GEMINI_MODEL`: (Optional) The model name, e.g., `gemini-2.5-flash`.
 - `GEMINI_BASE_URL`: (Optional) For using a custom endpoint.
+
+### Anthropic
+
+- `ANTHROPIC_API_KEY`: Your Anthropic API key.
+- `ANTHROPIC_MODEL`: (Optional) The model name, e.g., `claude-3-haiku-20240307`.
+- `ANTHROPIC_BASE_URL`: (Optional) For using a custom endpoint.
 
 ## Usage
 
