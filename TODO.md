@@ -4,20 +4,21 @@
 
 This document tracks the systematic improvements to the `github.com/liuzl/ai` library based on the comprehensive code analysis. The improvements are prioritized by impact and dependencies.
 
-**Current Status**: Ready to start
+**Current Status**: In Progress (1/7 completed)
 **Start Date**: 2025-11-10
 **Target Completion**: TBD
-**Current Test Coverage**: 58.7%
+**Current Test Coverage**: 63.0%
 **Target Test Coverage**: 80%+
 
 ---
 
 ## Priority 1: Fix Concurrency Safety Issues
 
-**Status**: 🔴 Not Started
+**Status**: 🟢 Completed
 **Priority**: CRITICAL
-**Estimated Effort**: 2-3 hours
-**Files Affected**: `tool_server.go`
+**Actual Effort**: 2 hours
+**Completion Date**: 2025-11-10
+**Files Affected**: `tool_server.go`, `tool_server_test.go`
 
 ### Problem
 - `ToolServerManager.clients` map has no concurrent access protection
@@ -30,18 +31,18 @@ This document tracks the systematic improvements to the `github.com/liuzl/ai` li
 - Use `RLock()` for read operations, `Lock()` for write operations
 
 ### Implementation Tasks
-- [ ] Add `mu sync.RWMutex` field to `ToolServerManager` struct
-- [ ] Protect `AddRemoteServer()` with write lock
-- [ ] Protect `GetClient()` with read lock
-- [ ] Protect `ListServerNames()` with read lock
-- [ ] Protect `LoadFromFile()` internal map access with write lock
-- [ ] Add race detector tests (`go test -race`)
+- [x] Add `mu sync.RWMutex` field to `ToolServerManager` struct
+- [x] Protect `AddRemoteServer()` with write lock
+- [x] Protect `GetClient()` with read lock
+- [x] Protect `ListServerNames()` with read lock
+- [x] Protect `LoadFromFile()` internal map access with write lock
+- [x] Add race detector tests (`go test -race`)
 
 ### Acceptance Criteria
-- [ ] All map operations are protected by mutex
-- [ ] `go test -race` passes without warnings
-- [ ] No breaking API changes
-- [ ] Existing tests still pass
+- [x] All map operations are protected by mutex
+- [x] `go test -race` passes without warnings
+- [x] No breaking API changes
+- [x] Existing tests still pass
 
 ### Testing Plan
 - Run all tests with race detector: `go test -race ./...`
@@ -381,7 +382,7 @@ type Logger interface {
 
 | Priority | Item | Status | Completion Date | Notes |
 |----------|------|--------|-----------------|-------|
-| 1 | Concurrency Safety | 🔴 Not Started | - | Critical for production use |
+| 1 | Concurrency Safety | 🟢 Completed | 2025-11-10 | ✅ All tests pass with -race |
 | 2 | Config Validation | 🔴 Not Started | - | Improves UX |
 | 3 | Error Types | 🔴 Not Started | - | Better error handling |
 | 4 | Test Coverage | 🔴 Not Started | - | Quality assurance |
