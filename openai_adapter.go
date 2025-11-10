@@ -3,6 +3,7 @@ package ai
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // openaiAdapter implements the providerAdapter interface for OpenAI.
@@ -26,15 +27,51 @@ func (a *openaiAdapter) buildRequestPayload(req *Request) (any, error) {
 	}
 
 	for i, msg := range req.Messages {
-		openaiReq.Messages[i] = openaiMessage{
+		openaiMsg := openaiMessage{
 			Role:       string(msg.Role),
-			Content:    msg.Content,
 			ToolCallID: msg.ToolCallID,
 		}
+
+		// Handle multimodal content
+		if len(msg.ContentParts) > 0 {
+			// Convert content parts to OpenAI format
+			parts := make([]openaiContentPart, 0, len(msg.ContentParts))
+			for _, part := range msg.ContentParts {
+				switch part.Type {
+				case ContentTypeText:
+					parts = append(parts, openaiContentPart{
+						Type: "text",
+						Text: part.Text,
+					})
+				case ContentTypeImage:
+					if part.ImageSource != nil {
+						var url string
+						switch part.ImageSource.Type {
+						case ImageSourceTypeURL:
+							url = part.ImageSource.URL
+						case ImageSourceTypeBase64:
+							// Format as data URI
+							url = formatBase64AsDataURI(part.ImageSource.Data, part.ImageSource.Format)
+						}
+						parts = append(parts, openaiContentPart{
+							Type: "image_url",
+							ImageURL: &openaiImageURL{
+								URL: url,
+							},
+						})
+					}
+				}
+			}
+			openaiMsg.Content = parts
+		} else if msg.Content != "" {
+			// Backward compatibility: simple text content
+			openaiMsg.Content = msg.Content
+		}
+
 		if len(msg.ToolCalls) > 0 {
-			openaiReq.Messages[i].ToolCalls = make([]openaiToolCall, len(msg.ToolCalls))
+			openaiMsg.ToolCalls = make([]openaiToolCall, len(msg.ToolCalls))
 			for j, tc := range msg.ToolCalls {
-				openaiReq.Messages[i].ToolCalls[j] = openaiToolCall{
+				openaiMsg.ToolCalls[j] = openaiToolCall{
 					ID:   tc.ID,
 					Type: tc.Type,
 					Function: openaiFunctionCall{
@@ -44,6 +81,8 @@ func (a *openaiAdapter) buildRequestPayload(req *Request) (any, error) {
 				}
 			}
 		}
+
+		openaiReq.Messages[i] = openaiMsg
 	}
 
 	if len(req.Tools) > 0 {
@@ -80,8 +119,23 @@ func (a *openaiAdapter) parseResponse(providerResp []byte) (*Response, error) {
 	}
 
 	choice := openaiResp.Choices[0]
-	universalResp := &Response{
-		Text: choice.Message.Content,
+	universalResp := &Response{}
+
+	// Handle Content field which can be either string (text-only) or []openaiContentPart (multimodal)
+	switch content := choice.Message.Content.(type) {
+	case string:
+		universalResp.Text = content
+	case []interface{}:
+		// Handle array of content parts (multimodal response)
+		for _, part := range content {
+			if partMap, ok := part.(map[string]interface{}); ok {
+				if partType, ok := partMap["type"].(string); ok && partType == "text" {
+					if text, ok := partMap["text"].(string); ok {
+						universalResp.Text += text
+					}
+				}
+			}
+		}
 	}
 
 	if len(choice.Message.ToolCalls) > 0 {
@@ -110,9 +164,20 @@ type openaiChatCompletionRequest struct {
 
 type openaiMessage struct {
 	Role       string           `json:"role"`
-	Content    string           `json:"content,omitempty"`
+	Content    any              `json:"content,omitempty"` // string or []openaiContentPart
 	ToolCalls  []openaiToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string           `json:"tool_call_id,omitempty"`
+}
+
+type openaiContentPart struct {
+	Type     string          `json:"type"` // "text" or "image_url"
+	Text     string          `json:"text,omitempty"`
+	ImageURL *openaiImageURL `json:"image_url,omitempty"`
+}
+
+type openaiImageURL struct {
+	URL    string `json:"url"`              // Can be HTTP(S) URL or data URI
+	Detail string `json:"detail,omitempty"` // "auto", "low", or "high" (optional)
 }
 
 type openaiToolCall struct {
@@ -143,4 +208,27 @@ type openaiChatCompletionResponse struct {
 
 type openaiChoice struct {
 	Message openaiMessage `json:"message"`
+}
+
+// formatBase64AsDataURI formats base64 image data as a data URI.
+// If the data already starts with "data:", it returns it as-is.
+// Otherwise, it prepends the appropriate data URI prefix based on the format.
+func formatBase64AsDataURI(data, format string) string {
+	// If already a data URI, return as-is
+	if strings.HasPrefix(data, "data:") {
+		return data
+	}
+
+	// Detect format from data if not specified
+	if format == "" {
+		format = "png" // default
+	}
+
+	// Map common formats to MIME types
+	mimeType := "image/" + format
+	if format == "jpg" {
+		mimeType = "image/jpeg"
+	}
+
+	return fmt.Sprintf("data:%s;base64,%s", mimeType, data)
 }

@@ -3,6 +3,7 @@ package ai
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // anthropicAdapter implements the providerAdapter interface for Anthropic.
@@ -35,20 +36,77 @@ func (a *anthropicAdapter) buildRequestPayload(req *Request) (any, error) {
 		switch msg.Role {
 		case RoleUser:
 			role = "user"
-			// A user message can be a simple text message or a tool result.
+			// A user message can be a simple text message, multimodal content, or a tool result.
 			if msg.ToolCallID != "" {
+				// Tool result message
 				contentBlocks = append(contentBlocks, anthropicContentBlock{
 					Type:      "tool_result",
 					ToolUseID: msg.ToolCallID,
 					Content:   msg.Content,
 				})
-			} else {
+			} else if len(msg.ContentParts) > 0 {
+				// Multimodal content
+				for _, part := range msg.ContentParts {
+					switch part.Type {
+					case ContentTypeText:
+						contentBlocks = append(contentBlocks, anthropicContentBlock{
+							Type: "text",
+							Text: part.Text,
+						})
+					case ContentTypeImage:
+						if part.ImageSource != nil {
+							// Determine media type
+							mediaType := "image/png" // default
+							if part.ImageSource.Format != "" {
+								mediaType = "image/" + part.ImageSource.Format
+								if part.ImageSource.Format == "jpg" {
+									mediaType = "image/jpeg"
+								}
+							}
+
+							source := &anthropicImageSource{MediaType: mediaType}
+							switch part.ImageSource.Type {
+							case ImageSourceTypeURL:
+								source.Type = "url"
+								source.URL = part.ImageSource.URL
+							case ImageSourceTypeBase64:
+								source.Type = "base64"
+								data := part.ImageSource.Data
+								// Remove data URI prefix if present
+								if strings.HasPrefix(data, "data:") {
+									if idx := strings.Index(data, ","); idx != -1 {
+										data = data[idx+1:]
+									}
+								}
+								source.Data = data
+							}
+
+							contentBlocks = append(contentBlocks, anthropicContentBlock{
+								Type:   "image",
+								Source: source,
+							})
+						}
+					}
+				}
+			} else if msg.Content != "" {
+				// Backward compatibility: simple text content
 				contentBlocks = append(contentBlocks, anthropicContentBlock{Type: "text", Text: msg.Content})
 			}
 		case RoleAssistant:
 			role = "assistant"
 			// An assistant message can have text content and tool calls.
-			if msg.Content != "" {
+			if len(msg.ContentParts) > 0 {
+				// Handle multimodal content (typically just text for assistant)
+				for _, part := range msg.ContentParts {
+					if part.Type == ContentTypeText {
+						contentBlocks = append(contentBlocks, anthropicContentBlock{
+							Type: "text",
+							Text: part.Text,
+						})
+					}
+				}
+			} else if msg.Content != "" {
+				// Backward compatibility: simple text content
 				contentBlocks = append(contentBlocks, anthropicContentBlock{Type: "text", Text: msg.Content})
 			}
 			for _, tc := range msg.ToolCalls {
@@ -150,6 +208,8 @@ type anthropicMessagesResponse struct {
 type anthropicContentBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
+	// For image content
+	Source *anthropicImageSource `json:"source,omitempty"`
 	// For tool use request from model
 	ID    string         `json:"id,omitempty"`
 	Name  string         `json:"name,omitempty"`
@@ -157,4 +217,11 @@ type anthropicContentBlock struct {
 	// For tool result response from user
 	ToolUseID string `json:"tool_use_id,omitempty"`
 	Content   string `json:"content,omitempty"`
+}
+
+type anthropicImageSource struct {
+	Type      string `json:"type"`       // "base64" or "url"
+	MediaType string `json:"media_type"` // "image/jpeg", "image/png", "image/gif", "image/webp"
+	Data      string `json:"data,omitempty"`
+	URL       string `json:"url,omitempty"`
 }

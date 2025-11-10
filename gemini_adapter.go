@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // geminiAdapter implements the providerAdapter interface for Google Gemini.
@@ -12,7 +13,7 @@ type geminiAdapter struct{}
 
 func (a *geminiAdapter) getModel(req *Request) string {
 	if req.Model == "" {
-		return "gemini-1.5-flash"
+		return "gemini-2.5-flash"
 	}
 	return req.Model
 }
@@ -33,12 +34,58 @@ func (a *geminiAdapter) buildRequestPayload(req *Request) (any, error) {
 		switch msg.Role {
 		case RoleUser:
 			role = "user"
-			if msg.Content != "" {
+			// Handle multimodal content if present
+			if len(msg.ContentParts) > 0 {
+				for _, part := range msg.ContentParts {
+					switch part.Type {
+					case ContentTypeText:
+						parts = append(parts, geminiPart{Text: &part.Text})
+					case ContentTypeImage:
+						if part.ImageSource != nil {
+							if part.ImageSource.Type == ImageSourceTypeBase64 {
+								// Gemini only supports inline base64 images
+								data := part.ImageSource.Data
+								// Remove data URI prefix if present
+								if strings.HasPrefix(data, "data:") {
+									if idx := strings.Index(data, ","); idx != -1 {
+										data = data[idx+1:]
+									}
+								}
+								// Determine MIME type
+								mimeType := "image/png" // default
+								if part.ImageSource.Format != "" {
+									mimeType = "image/" + part.ImageSource.Format
+									if part.ImageSource.Format == "jpg" {
+										mimeType = "image/jpeg"
+									}
+								}
+								parts = append(parts, geminiPart{
+									InlineData: &geminiInlineData{
+										MimeType: mimeType,
+										Data:     data,
+									},
+								})
+							}
+							// Note: Gemini does not support HTTP(S) image URLs directly.
+							// Only base64 inline data and Google Cloud Storage URIs are supported.
+						}
+					}
+				}
+			} else if msg.Content != "" {
+				// Backward compatibility: simple text content
 				parts = append(parts, geminiPart{Text: &msg.Content})
 			}
 		case RoleAssistant:
 			role = "model"
-			if msg.Content != "" {
+			// Handle multimodal content if present
+			if len(msg.ContentParts) > 0 {
+				for _, part := range msg.ContentParts {
+					if part.Type == ContentTypeText {
+						parts = append(parts, geminiPart{Text: &part.Text})
+					}
+				}
+			} else if msg.Content != "" {
+				// Backward compatibility: simple text content
 				parts = append(parts, geminiPart{Text: &msg.Content})
 			}
 			if len(msg.ToolCalls) > 0 {
@@ -172,8 +219,14 @@ type geminiContent struct {
 
 type geminiPart struct {
 	Text             *string                 `json:"text,omitempty"`
+	InlineData       *geminiInlineData       `json:"inlineData,omitempty"`
 	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
+}
+
+type geminiInlineData struct {
+	MimeType string `json:"mimeType"` // e.g., "image/png", "image/jpeg"
+	Data     string `json:"data"`     // Base64-encoded image data
 }
 
 type geminiFunctionCall struct {

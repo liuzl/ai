@@ -50,12 +50,45 @@ const (
 	RoleTool      Role = "tool"
 )
 
+// ContentType defines the type of content in a multimodal message.
+type ContentType string
+
+const (
+	ContentTypeText  ContentType = "text"
+	ContentTypeImage ContentType = "image"
+)
+
+// ContentPart represents a part of multimodal content (text, image, etc.).
+type ContentPart struct {
+	Type        ContentType
+	Text        string       // For text parts
+	ImageSource *ImageSource // For image parts
+}
+
+// ImageSourceType defines how an image is provided.
+type ImageSourceType string
+
+const (
+	ImageSourceTypeURL    ImageSourceType = "url"
+	ImageSourceTypeBase64 ImageSourceType = "base64"
+)
+
+// ImageSource represents an image input for vision-enabled models.
+type ImageSource struct {
+	Type   ImageSourceType // "url" or "base64"
+	URL    string          // HTTP(S) URL to the image
+	Data   string          // Base64-encoded image data (with or without data URI prefix)
+	Format string          // Image format: "png", "jpeg", "gif", "webp" (optional, can be auto-detected)
+}
+
 // Message represents a universal message structure.
+// Supports both simple text messages (Content) and multimodal messages (ContentParts).
 type Message struct {
-	Role       Role
-	Content    string
-	ToolCalls  []ToolCall
-	ToolCallID string
+	Role         Role
+	Content      string        // Simple text content (for backward compatibility)
+	ContentParts []ContentPart // Multimodal content (text + images, etc.)
+	ToolCalls    []ToolCall
+	ToolCallID   string
 }
 
 // Tool defines a tool the model can use.
@@ -252,4 +285,57 @@ func NewClientFromEnv() (Client, error) {
 	opts = append(opts, WithTimeout(5*time.Minute))
 
 	return NewClient(opts...)
+}
+
+// --- Multimodal Helper Functions ---
+
+// NewTextMessage creates a simple text message.
+// This is a convenience function for backward compatibility.
+func NewTextMessage(role Role, text string) Message {
+	return Message{
+		Role:    role,
+		Content: text,
+	}
+}
+
+// NewMultimodalMessage creates a message with multimodal content parts.
+func NewMultimodalMessage(role Role, parts []ContentPart) Message {
+	return Message{
+		Role:         role,
+		ContentParts: parts,
+	}
+}
+
+// NewTextPart creates a text content part.
+func NewTextPart(text string) ContentPart {
+	return ContentPart{
+		Type: ContentTypeText,
+		Text: text,
+	}
+}
+
+// NewImagePartFromURL creates an image content part from a URL.
+func NewImagePartFromURL(url string) ContentPart {
+	return ContentPart{
+		Type: ContentTypeImage,
+		ImageSource: &ImageSource{
+			Type: ImageSourceTypeURL,
+			URL:  url,
+		},
+	}
+}
+
+// NewImagePartFromBase64 creates an image content part from base64-encoded data.
+// The data parameter should be the base64-encoded image data.
+// The format parameter specifies the image format (e.g., "png", "jpeg", "gif", "webp").
+// If format is empty, it will be auto-detected from the data URI prefix if present.
+func NewImagePartFromBase64(data, format string) ContentPart {
+	return ContentPart{
+		Type: ContentTypeImage,
+		ImageSource: &ImageSource{
+			Type:   ImageSourceTypeBase64,
+			Data:   data,
+			Format: format,
+		},
+	}
 }
