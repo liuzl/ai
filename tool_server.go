@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // ToolServerManager discovers and manages tool server clients from various sources.
 // It acts as a central registry for all known tool servers.
+// All methods are safe for concurrent use.
 type ToolServerManager struct {
+	mu      sync.RWMutex
 	clients map[string]*ToolServerClient
 }
 
@@ -52,7 +55,9 @@ func (m *ToolServerManager) LoadFromFile(configFile string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create client for '%s': %w", name, err)
 		}
+		m.mu.Lock()
 		m.clients[name] = client
+		m.mu.Unlock()
 	}
 	return nil
 }
@@ -62,6 +67,10 @@ func (m *ToolServerManager) AddRemoteServer(name, url string) error {
 	if url == "" {
 		return fmt.Errorf("url cannot be empty for remote server '%s'", name)
 	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if _, exists := m.clients[name]; exists {
 		return fmt.Errorf("server with name '%s' already exists", name)
 	}
@@ -76,6 +85,9 @@ func (m *ToolServerManager) AddRemoteServer(name, url string) error {
 
 // ListServerNames returns a slice of the names of all registered servers.
 func (m *ToolServerManager) ListServerNames() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	names := make([]string, 0, len(m.clients))
 	for name := range m.clients {
 		names = append(names, name)
@@ -85,6 +97,9 @@ func (m *ToolServerManager) ListServerNames() []string {
 
 // GetClient retrieves a ready-to-use client for the server with the given name.
 func (m *ToolServerManager) GetClient(name string) (*ToolServerClient, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	client, ok := m.clients[name]
 	return client, ok
 }
