@@ -15,7 +15,7 @@ func newAnthropicClient(cfg *Config) Client {
 	headers.Set("anthropic-version", "2023-06-01") // Required header
 
 	return &genericClient{
-		b:       newBaseClient(baseURL, "v1", cfg.timeout, headers, 3),
+		b:       newBaseClient(string(ProviderAnthropic), baseURL, "v1", cfg.timeout, headers, 3),
 		adapter: &anthropicAdapter{},
 	}
 }

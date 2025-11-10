@@ -15,7 +15,7 @@ func newOpenAIClient(cfg *Config) Client {
 	headers.Set("Authorization", "Bearer "+cfg.apiKey)
 
 	return &genericClient{
-		b:       newBaseClient(baseURL, "v1", cfg.timeout, headers, 3),
+		b:       newBaseClient(string(ProviderOpenAI), baseURL, "v1", cfg.timeout, headers, 3),
 		adapter: &openaiAdapter{},
 	}
 }

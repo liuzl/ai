@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -20,10 +23,11 @@ type baseClient struct {
 	apiVersion string
 	headers    http.Header
 	maxRetries int
+	provider   string
 }
 
 // newBaseClient creates and configures a new baseClient.
-func newBaseClient(baseURL, apiVersion string, timeout time.Duration, headers http.Header, maxRetries int) *baseClient {
+func newBaseClient(provider, baseURL, apiVersion string, timeout time.Duration, headers http.Header, maxRetries int) *baseClient {
 	if headers == nil {
 		headers = make(http.Header)
 	}
@@ -35,6 +39,7 @@ func newBaseClient(baseURL, apiVersion string, timeout time.Duration, headers ht
 		apiVersion: apiVersion,
 		headers:    headers,
 		maxRetries: maxRetries,
+		provider:   provider,
 	}
 }
 
@@ -86,7 +91,16 @@ func (c *baseClient) doRequestRaw(ctx context.Context, method, path string, reqB
 		}
 	}
 	if err != nil {
-		return nil, fmt.Errorf("request failed after %d attempts: %w", c.maxRetries, err)
+		// Check for timeout error
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, NewTimeoutError(c.provider, c.httpClient.Timeout, err)
+		}
+		// Check for context cancellation
+		if errors.Is(err, context.Canceled) {
+			return nil, fmt.Errorf("request canceled: %w", err)
+		}
+		// Network error (connection refused, DNS, etc.)
+		return nil, NewNetworkError(c.provider, err.Error(), err)
 	}
 	defer httpResp.Body.Close()
 
@@ -96,16 +110,60 @@ func (c *baseClient) doRequestRaw(ctx context.Context, method, path string, reqB
 	}
 
 	if httpResp.StatusCode >= 400 {
+		// Try to parse structured API error
 		var apiError struct {
 			Error struct {
 				Message string `json:"message"`
+				Type    string `json:"type"`
 			} `json:"error"`
 		}
+		errorMessage := string(respBodyBytes)
+		errorDetails := ""
 		if json.Unmarshal(respBodyBytes, &apiError) == nil && apiError.Error.Message != "" {
-			return nil, fmt.Errorf("API error %d: %s", httpResp.StatusCode, apiError.Error.Message)
+			errorMessage = apiError.Error.Message
+			errorDetails = apiError.Error.Type
 		}
-		return nil, fmt.Errorf("HTTP %d: %s", httpResp.StatusCode, string(respBodyBytes))
+
+		// Return typed errors based on status code
+		switch httpResp.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return nil, NewAuthenticationError(c.provider, httpResp.StatusCode, errorMessage, nil)
+		case http.StatusBadRequest:
+			return nil, NewInvalidRequestError(c.provider, errorMessage, errorDetails, nil)
+		case http.StatusTooManyRequests:
+			retryAfter := parseRetryAfter(httpResp.Header.Get("Retry-After"))
+			return nil, NewRateLimitError(c.provider, errorMessage, retryAfter, nil)
+		default:
+			if httpResp.StatusCode >= 500 {
+				return nil, NewServerError(c.provider, httpResp.StatusCode, errorMessage, nil)
+			}
+			// Other 4xx errors
+			return nil, NewUnknownError(c.provider, httpResp.StatusCode, errorMessage, nil)
+		}
 	}
 
 	return respBodyBytes, nil
+}
+
+// parseRetryAfter parses the Retry-After header and returns the duration.
+// It supports both seconds (integer) and HTTP date formats.
+func parseRetryAfter(header string) time.Duration {
+	if header == "" {
+		return 0
+	}
+
+	// Try parsing as integer (seconds)
+	if seconds, err := strconv.Atoi(strings.TrimSpace(header)); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+
+	// Try parsing as HTTP date
+	if t, err := http.ParseTime(header); err == nil {
+		duration := time.Until(t)
+		if duration > 0 {
+			return duration
+		}
+	}
+
+	return 0
 }

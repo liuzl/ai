@@ -15,7 +15,7 @@ func newGeminiClient(cfg *Config) Client {
 	headers.Set("x-goog-api-key", cfg.apiKey)
 
 	return &genericClient{
-		b:       newBaseClient(baseURL, "v1beta", cfg.timeout, headers, 3),
+		b:       newBaseClient(string(ProviderGemini), baseURL, "v1beta", cfg.timeout, headers, 3),
 		adapter: &geminiAdapter{},
 	}
 }
