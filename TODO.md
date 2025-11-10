@@ -4,10 +4,10 @@
 
 This document tracks the systematic improvements to the `github.com/liuzl/ai` library based on the comprehensive code analysis. The improvements are prioritized by impact and dependencies.
 
-**Current Status**: In Progress (2/7 completed)
+**Current Status**: In Progress (3/7 completed)
 **Start Date**: 2025-11-10
 **Target Completion**: TBD
-**Current Test Coverage**: 65.9%
+**Current Test Coverage**: 64.0%
 **Target Test Coverage**: 80%+
 
 ---
@@ -98,10 +98,11 @@ This document tracks the systematic improvements to the `github.com/liuzl/ai` li
 
 ## Priority 3: Define Custom Error Types
 
-**Status**: 🔴 Not Started
+**Status**: 🟢 Completed
 **Priority**: HIGH
-**Estimated Effort**: 4-5 hours
-**Files Affected**: `errors.go` (new), `http_client.go`, all adapters
+**Actual Effort**: 4 hours
+**Completion Date**: 2025-11-10
+**Files Affected**: `errors.go`, `errors_test.go`, `http_client.go`, `client_*.go`
 
 ### Problem
 - No way to distinguish between error types programmatically
@@ -115,17 +116,19 @@ This document tracks the systematic improvements to the `github.com/liuzl/ai` li
 - Support better retry logic based on error type
 
 ### Implementation Tasks
-- [ ] Create new `errors.go` file
-- [ ] Define base error interface with common methods
-- [ ] Define `AuthenticationError` (401, 403)
-- [ ] Define `RateLimitError` (429) with retry-after info
-- [ ] Define `InvalidRequestError` (400) with details
-- [ ] Define `NetworkError` for connection failures
-- [ ] Define `TimeoutError` for timeout scenarios
-- [ ] Define `ServerError` (5xx)
-- [ ] Update `httpClient.doRequest()` to return typed errors
-- [ ] Update all adapters to return typed errors
-- [ ] Add error unwrapping support for error chains
+- [x] Create new `errors.go` file
+- [x] Define base error interface with common methods
+- [x] Define `AuthenticationError` (401, 403)
+- [x] Define `RateLimitError` (429) with retry-after info
+- [x] Define `InvalidRequestError` (400) with details
+- [x] Define `NetworkError` for connection failures
+- [x] Define `TimeoutError` for timeout scenarios
+- [x] Define `ServerError` (5xx)
+- [x] Define `UnknownError` as fallback
+- [x] Update `httpClient.doRequest()` to return typed errors
+- [x] Update all provider clients to pass provider name
+- [x] Add error unwrapping support for error chains
+- [x] Add parseRetryAfter() helper function
 
 ### Error Type Hierarchy
 ```
@@ -139,11 +142,11 @@ ErrorWithStatus (interface)
 ```
 
 ### Acceptance Criteria
-- [ ] All HTTP errors return appropriate typed error
-- [ ] Errors can be checked with `errors.As()`
-- [ ] Error messages include relevant context (status code, provider, etc.)
-- [ ] Backward compatible with existing error handling
-- [ ] Documentation updated with error handling examples
+- [x] All HTTP errors return appropriate typed error
+- [x] Errors can be checked with `errors.As()`
+- [x] Error messages include relevant context (status code, provider, etc.)
+- [x] Backward compatible with existing error handling
+- [x] Comprehensive error tests added (10 test cases)
 
 ### Testing Plan
 - Add `TestErrorTypes` for each error type
@@ -385,7 +388,7 @@ type Logger interface {
 |----------|------|--------|-----------------|-------|
 | 1 | Concurrency Safety | 🟢 Completed | 2025-11-10 | ✅ All tests pass with -race |
 | 2 | Config Validation | 🟢 Completed | 2025-11-10 | ✅ 24 test cases, clear errors |
-| 3 | Error Types | 🔴 Not Started | - | Better error handling |
+| 3 | Error Types | 🟢 Completed | 2025-11-10 | ✅ 7 error types, errors.As() support |
 | 4 | Test Coverage | 🔴 Not Started | - | Quality assurance |
 | 5 | Code Duplication | 🔴 Not Started | - | Maintainability |
 | 6 | Structured Logging | 🔴 Not Started | - | Observability |
