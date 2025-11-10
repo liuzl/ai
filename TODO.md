@@ -4,11 +4,13 @@
 
 This document tracks the systematic improvements to the `github.com/liuzl/ai` library based on the comprehensive code analysis. The improvements are prioritized by impact and dependencies.
 
-**Current Status**: In Progress (3/7 completed)
+**Current Status**: In Progress (3/8 completed)
 **Start Date**: 2025-11-10
 **Target Completion**: TBD
 **Current Test Coverage**: 64.0%
 **Target Test Coverage**: 80%+
+
+**Next Priority**: 🎯 Priority 4 - Multimodal Input Support (HIGH)
 
 ---
 
@@ -156,23 +158,130 @@ ErrorWithStatus (interface)
 
 ---
 
-## Priority 4: Increase Test Coverage
+## Priority 4: Add Multimodal Input Support
 
 **Status**: 🔴 Not Started
 **Priority**: HIGH
-**Estimated Effort**: 8-10 hours
-**Files Affected**: `tool_server_test.go` (new), `http_client_test.go` (new), `ai_test.go`
+**Estimated Effort**: 6-8 hours
+**Files Affected**: `ai.go`, all adapters, `multimodal_test.go` (new)
 
 ### Problem
-- Current coverage: 58.7%
-- `tool_server.go` has no tests
+- Current `Message.Content` only supports text (string)
+- Cannot send images, audio, or video to vision-enabled models
+- Missing support for GPT-4o, Gemini 2.0/2.5, Claude 3/4 vision capabilities
+- No unified API for multimodal inputs across providers
+
+### Objectives
+- Extend `Message` structure to support multimodal content
+- Maintain backward compatibility with existing text-only code
+- Support images (URL and base64) as primary focus
+- Provide unified API that works across all three providers
+- Enable future support for audio and video
+
+### Provider Capabilities (2025)
+
+**OpenAI (GPT-4o, GPT-4.1)**:
+- Content can be string or array of content parts
+- Supports `text` and `image_url` (URL or base64)
+- Max 10 images per request
+
+**Google Gemini (2.0 Flash, 2.5 Pro/Flash)**:
+- Parts array with `text` or `inline_data`
+- Supports base64 inline data or File API
+- Max 3,600 images per request
+
+**Anthropic (Claude 3.x, 4.x)**:
+- Content array with `text` or `image` blocks
+- Supports base64 or File API (with file_id)
+- Max 100 images per API request
+
+### Implementation Tasks
+- [ ] Define `ContentPart` type for multimodal content
+- [ ] Define `ImageSource` struct with URL/base64/data support
+- [ ] Extend `Message` struct with `ContentParts []ContentPart` field
+- [ ] Keep `Content string` for backward compatibility
+- [ ] Add helper methods: `NewTextMessage()`, `NewImageMessage()`, etc.
+- [ ] Update `openai_adapter.go` to handle content parts
+- [ ] Update `gemini_adapter.go` to handle content parts
+- [ ] Update `anthropic_adapter.go` to handle content parts
+- [ ] Add image validation (format, size checks)
+- [ ] Add base64 encoding helpers
+- [ ] Create comprehensive multimodal tests
+- [ ] Add examples for image input usage
+
+### Proposed Data Structure
+```go
+// ContentPart represents a part of multimodal content
+type ContentPart struct {
+    Type        string      // "text", "image", "audio", "video"
+    Text        string      // For text parts
+    ImageSource *ImageSource // For image parts
+    // AudioSource, VideoSource for future
+}
+
+// ImageSource represents an image input
+type ImageSource struct {
+    Type   string // "url", "base64", "file"
+    URL    string // HTTP(S) URL
+    Data   string // Base64-encoded data
+    Format string // "png", "jpeg", "gif", "webp"
+}
+
+// Message extended
+type Message struct {
+    Role         Role
+    Content      string           // Deprecated but kept for compatibility
+    ContentParts []ContentPart    // New multimodal support
+    ToolCalls    []ToolCall
+    ToolCallID   string
+}
+```
+
+### Migration Strategy
+- Existing code using `Content` string continues to work
+- New code can use `ContentParts` for multimodal inputs
+- If both are set, `ContentParts` takes precedence
+- Adapters check `ContentParts` first, fall back to `Content`
+
+### Acceptance Criteria
+- [ ] Text-only messages work exactly as before (backward compatible)
+- [ ] Image URLs work across all three providers
+- [ ] Base64 images work across all three providers
+- [ ] Multiple images in one message work
+- [ ] Clear error messages for unsupported formats
+- [ ] Image size/format validation implemented
+- [ ] Comprehensive tests with real multimodal scenarios
+- [ ] Examples demonstrate image input usage
+
+### Testing Plan
+- Add `TestMultimodalTextOnly` - backward compatibility
+- Add `TestMultimodalImageURL` for all providers
+- Add `TestMultimodalImageBase64` for all providers
+- Add `TestMultimodalMultipleImages` for all providers
+- Add `TestMultimodalMixedContent` (text + images)
+- Test image format validation
+- Test error handling for invalid images
+- Add example: `examples/vision_chat/main.go`
+
+---
+
+## Priority 5: Increase Test Coverage
+
+**Status**: 🔴 Not Started
+**Priority**: MEDIUM
+**Estimated Effort**: 6-8 hours
+**Files Affected**: `tool_server_test.go` (enhanced), `http_client_test.go` (new), `ai_test.go`
+
+### Problem
+- Current coverage: 64.0%
 - HTTP retry logic not fully tested
 - Edge cases and error paths not covered
+- Need tests for new multimodal features
 
 ### Objectives
 - Increase coverage to 80%+
-- Add comprehensive tests for `tool_server.go`
-- Test all retry scenarios in `http_client.go`
+- Add comprehensive tests for HTTP retry logic
+- Test all error scenarios in `http_client.go`
 - Cover edge cases and error handling paths
 
 ### Implementation Tasks
@@ -229,10 +338,10 @@ ErrorWithStatus (interface)
 
 ---
 
-## Priority 5: Eliminate Code Duplication
+## Priority 6: Eliminate Code Duplication
 
 **Status**: 🔴 Not Started
-**Priority**: MEDIUM
+**Priority**: LOW
 **Estimated Effort**: 3-4 hours
 **Files Affected**: `client_*.go`, `format_service.go`, adapters
 
@@ -269,10 +378,10 @@ ErrorWithStatus (interface)
 
 ---
 
-## Priority 6: Add Structured Logging Support
+## Priority 7: Add Structured Logging Support
 
 **Status**: 🔴 Not Started
-**Priority**: MEDIUM
+**Priority**: LOW
 **Estimated Effort**: 4-5 hours
 **Files Affected**: `logger.go` (new), `ai.go`, `http_client.go`, `tool_server.go`
 
@@ -326,10 +435,10 @@ type Logger interface {
 
 ---
 
-## Priority 7: Add Request Validation
+## Priority 8: Add Request Validation
 
 **Status**: 🔴 Not Started
-**Priority**: MEDIUM
+**Priority**: LOW
 **Estimated Effort**: 3-4 hours
 **Files Affected**: `ai.go`, `provider_adapter.go`
 
@@ -389,10 +498,11 @@ type Logger interface {
 | 1 | Concurrency Safety | 🟢 Completed | 2025-11-10 | ✅ All tests pass with -race |
 | 2 | Config Validation | 🟢 Completed | 2025-11-10 | ✅ 24 test cases, clear errors |
 | 3 | Error Types | 🟢 Completed | 2025-11-10 | ✅ 7 error types, errors.As() support |
-| 4 | Test Coverage | 🔴 Not Started | - | Quality assurance |
-| 5 | Code Duplication | 🔴 Not Started | - | Maintainability |
-| 6 | Structured Logging | 🔴 Not Started | - | Observability |
-| 7 | Request Validation | 🔴 Not Started | - | Developer experience |
+| 4 | Multimodal Input | 🔴 Not Started | - | 🎯 Images for GPT-4o/Gemini/Claude |
+| 5 | Test Coverage | 🔴 Not Started | - | Target 80%+ coverage |
+| 6 | Code Duplication | 🔴 Not Started | - | Maintainability |
+| 7 | Structured Logging | 🔴 Not Started | - | Observability |
+| 8 | Request Validation | 🔴 Not Started | - | Developer experience |
 
 ### Legend
 - 🔴 Not Started
@@ -456,7 +566,7 @@ Addresses: TODO.md Priority 1
 These items are identified but not in current plan:
 
 - Streaming response support
-- Multimodal inputs (images, audio, video)
+- Audio and video input support (multimodal images are in Priority 4)
 - Request/response caching
 - Middleware/interceptor hooks
 - Connection pooling for tool servers
@@ -464,6 +574,7 @@ These items are identified but not in current plan:
 - Circuit breaker pattern
 - Request batching
 - Response pagination handling
+- Native image generation support
 
 ---
 
