@@ -18,7 +18,7 @@ func TestToolServerManagerConcurrency(t *testing.T) {
 	wg.Add(numGoroutines * 3) // 3 operations per goroutine
 
 	// Concurrent AddRemoteServer operations
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(idx int) {
 			defer wg.Done()
 			serverName := "test-server-" + string(rune('a'+idx%26)) + string(rune('0'+idx/26))
@@ -27,7 +27,7 @@ func TestToolServerManagerConcurrency(t *testing.T) {
 	}
 
 	// Concurrent ListServerNames operations
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		go func() {
 			defer wg.Done()
 			_ = manager.ListServerNames()
@@ -35,7 +35,7 @@ func TestToolServerManagerConcurrency(t *testing.T) {
 	}
 
 	// Concurrent GetClient operations
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(idx int) {
 			defer wg.Done()
 			serverName := "test-server-" + string(rune('a'+idx%26)) + string(rune('0'+idx/26))
