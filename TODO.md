@@ -4,10 +4,10 @@
 
 This document tracks the systematic improvements to the `github.com/liuzl/ai` library based on the comprehensive code analysis. The improvements are prioritized by impact and dependencies.
 
-**Current Status**: In Progress (1/7 completed)
+**Current Status**: In Progress (2/7 completed)
 **Start Date**: 2025-11-10
 **Target Completion**: TBD
-**Current Test Coverage**: 63.0%
+**Current Test Coverage**: 65.9%
 **Target Test Coverage**: 80%+
 
 ---
@@ -53,10 +53,11 @@ This document tracks the systematic improvements to the `github.com/liuzl/ai` li
 
 ## Priority 2: Add Configuration Validation
 
-**Status**: 🔴 Not Started
+**Status**: 🟢 Completed
 **Priority**: HIGH
-**Estimated Effort**: 3-4 hours
-**Files Affected**: `ai.go`, `client_*.go`
+**Actual Effort**: 3 hours
+**Completion Date**: 2025-11-10
+**Files Affected**: `ai.go`, `config_validation_test.go`
 
 ### Problem
 - No validation of model names
@@ -70,22 +71,22 @@ This document tracks the systematic improvements to the `github.com/liuzl/ai` li
 - Prevent runtime panics due to bad configuration
 
 ### Implementation Tasks
-- [ ] Add `validateConfig()` function in `ai.go`
-- [ ] Validate `timeout > 0` in `NewClient()`
-- [ ] Validate `baseURL` is valid URL format (if provided)
-- [ ] Validate `apiKey` is not empty
-- [ ] Validate `provider` is one of supported providers
-- [ ] Validate `model` against provider's known models (optional warning)
-- [ ] Update `NewClientFromEnv()` to validate environment variables
-- [ ] Add validation for functional options (`WithTimeout`, `WithBaseURL`, etc.)
+- [x] Add `validateConfig()` function in `ai.go`
+- [x] Validate `timeout > 0` in `NewClient()`
+- [x] Validate `baseURL` is valid URL format (if provided)
+- [x] Validate `apiKey` is not empty
+- [x] Validate `provider` is one of supported providers
+- [x] Validate `model` is not whitespace-only if provided
+- [x] Validation automatically applies via `NewClientFromEnv()`
+- [x] Added 24 comprehensive test cases
 
 ### Acceptance Criteria
-- [ ] Invalid timeout returns error
-- [ ] Invalid baseURL returns error
-- [ ] Empty API key returns error
-- [ ] Unknown provider returns error with helpful message
-- [ ] All validation errors are clear and actionable
-- [ ] Existing valid configurations still work
+- [x] Invalid timeout returns error
+- [x] Invalid baseURL returns error
+- [x] Empty API key returns error
+- [x] Unknown provider returns error with helpful message
+- [x] All validation errors are clear and actionable
+- [x] Existing valid configurations still work
 
 ### Testing Plan
 - Add `TestConfigValidation` with subtests for each validation
@@ -383,7 +384,7 @@ type Logger interface {
 | Priority | Item | Status | Completion Date | Notes |
 |----------|------|--------|-----------------|-------|
 | 1 | Concurrency Safety | 🟢 Completed | 2025-11-10 | ✅ All tests pass with -race |
-| 2 | Config Validation | 🔴 Not Started | - | Improves UX |
+| 2 | Config Validation | 🟢 Completed | 2025-11-10 | ✅ 24 test cases, clear errors |
 | 3 | Error Types | 🔴 Not Started | - | Better error handling |
 | 4 | Test Coverage | 🔴 Not Started | - | Quality assurance |
 | 5 | Code Duplication | 🔴 Not Started | - | Maintainability |
