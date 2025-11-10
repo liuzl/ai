@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -115,6 +116,62 @@ func WithTimeout(timeout time.Duration) Option {
 	return func(c *Config) { c.timeout = timeout }
 }
 
+// validateConfig validates the client configuration and returns an error if invalid.
+func validateConfig(cfg *Config) error {
+	// Validate provider
+	if cfg.provider == "" {
+		return fmt.Errorf("provider is required, use WithProvider()")
+	}
+
+	// Validate provider is supported
+	switch cfg.provider {
+	case ProviderOpenAI, ProviderGemini, ProviderAnthropic:
+		// Valid provider
+	default:
+		return fmt.Errorf("unsupported provider: %q (supported: openai, gemini, anthropic)", cfg.provider)
+	}
+
+	// Validate API key
+	if cfg.apiKey == "" {
+		return fmt.Errorf("API key is required for provider %q, use WithAPIKey()", cfg.provider)
+	}
+	if strings.TrimSpace(cfg.apiKey) == "" {
+		return fmt.Errorf("API key cannot be empty or whitespace only")
+	}
+
+	// Validate timeout
+	if cfg.timeout <= 0 {
+		return fmt.Errorf("timeout must be positive, got %v", cfg.timeout)
+	}
+
+	// Validate baseURL if provided
+	if cfg.baseURL != "" {
+		if strings.TrimSpace(cfg.baseURL) == "" {
+			return fmt.Errorf("baseURL cannot be empty or whitespace only")
+		}
+		parsedURL, err := url.Parse(cfg.baseURL)
+		if err != nil {
+			return fmt.Errorf("invalid baseURL: %w", err)
+		}
+		if parsedURL.Scheme == "" {
+			return fmt.Errorf("baseURL must include scheme (http:// or https://), got: %q", cfg.baseURL)
+		}
+		if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+			return fmt.Errorf("baseURL scheme must be http or https, got: %q", parsedURL.Scheme)
+		}
+		if parsedURL.Host == "" {
+			return fmt.Errorf("baseURL must include host, got: %q", cfg.baseURL)
+		}
+	}
+
+	// Validate model if provided
+	if cfg.model != "" && strings.TrimSpace(cfg.model) == "" {
+		return fmt.Errorf("model cannot be empty or whitespace only")
+	}
+
+	return nil
+}
+
 // NewClient is the single, unified factory function to create an AI client.
 func NewClient(opts ...Option) (Client, error) {
 	cfg := &Config{timeout: 30 * time.Second}
@@ -122,11 +179,9 @@ func NewClient(opts ...Option) (Client, error) {
 		opt(cfg)
 	}
 
-	if cfg.provider == "" {
-		return nil, fmt.Errorf("provider is required, use WithProvider()")
-	}
-	if cfg.apiKey == "" {
-		return nil, fmt.Errorf("API key is required, use WithAPIKey()")
+	// Validate configuration
+	if err := validateConfig(cfg); err != nil {
+		return nil, err
 	}
 
 	switch cfg.provider {
@@ -137,6 +192,7 @@ func NewClient(opts ...Option) (Client, error) {
 	case ProviderAnthropic:
 		return newAnthropicClient(cfg), nil
 	default:
+		// This should never happen due to validateConfig, but keep for safety
 		return nil, fmt.Errorf("unknown provider: %q", cfg.provider)
 	}
 }
