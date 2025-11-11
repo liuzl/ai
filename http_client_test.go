@@ -339,7 +339,7 @@ func TestHTTPClientInvalidJSON(t *testing.T) {
 
 	// Create a value that cannot be marshaled to JSON
 	invalidValue := make(chan int) // channels cannot be marshaled
-	_, err := client.doRequestRaw(context.Background(), "POST", "/test", map[string]interface{}{"invalid": invalidValue})
+	_, err := client.doRequestRaw(context.Background(), "POST", "/test", map[string]any{"invalid": invalidValue})
 
 	if err == nil {
 		t.Fatal("Expected error for invalid JSON, got nil")

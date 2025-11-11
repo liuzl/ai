@@ -223,7 +223,7 @@ func toGeminiFormat(resp *Response) ([]byte, error) {
 	}
 
 	for _, tc := range resp.ToolCalls {
-		var args map[string]interface{}
+		var args map[string]any
 		if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal tool call arguments: %w", err)
 		}
@@ -343,7 +343,7 @@ func toAnthropicFormat(resp *Response) ([]byte, error) {
 	}
 
 	for _, tc := range resp.ToolCalls {
-		var input map[string]interface{}
+		var input map[string]any
 		if err := json.Unmarshal([]byte(tc.Arguments), &input); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal tool call arguments: %w", err)
 		}

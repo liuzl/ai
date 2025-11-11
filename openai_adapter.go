@@ -125,10 +125,10 @@ func (a *openaiAdapter) parseResponse(providerResp []byte) (*Response, error) {
 	switch content := choice.Message.Content.(type) {
 	case string:
 		universalResp.Text = content
-	case []interface{}:
+	case []any:
 		// Handle array of content parts (multimodal response)
 		for _, part := range content {
-			if partMap, ok := part.(map[string]interface{}); ok {
+			if partMap, ok := part.(map[string]any); ok {
 				if partType, ok := partMap["type"].(string); ok && partType == "text" {
 					if text, ok := partMap["text"].(string); ok {
 						universalResp.Text += text

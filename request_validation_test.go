@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -527,7 +528,7 @@ func TestRequestValidation_Integration(t *testing.T) {
 
 	// Test with invalid request (empty messages)
 	req := &Request{Messages: []Message{}}
-	_, err = client.Generate(nil, req)
+	_, err = client.Generate(context.TODO(), req)
 
 	if err == nil {
 		t.Fatal("Expected validation error, got nil")

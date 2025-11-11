@@ -288,7 +288,7 @@ func TestImagePartFromBase64WithDataURI(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 
 		// The data URI prefix should be handled correctly
-		var reqData map[string]interface{}
+		var reqData map[string]any
 		if err := json.Unmarshal(body, &reqData); err != nil {
 			t.Fatalf("Failed to parse request: %v", err)
 		}

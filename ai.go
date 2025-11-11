@@ -93,7 +93,7 @@ func (r *Request) Validate() error {
 				return fmt.Errorf("message[%d].tool_calls[%d]: arguments cannot be empty", i, j)
 			}
 			// Validate arguments is valid JSON
-			var args map[string]interface{}
+			var args map[string]any
 			if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
 				return fmt.Errorf("message[%d].tool_calls[%d]: invalid JSON arguments: %w", i, j, err)
 			}
@@ -112,7 +112,7 @@ func (r *Request) Validate() error {
 			return fmt.Errorf("tools[%d]: function parameters cannot be empty", i)
 		}
 		// Validate parameters is valid JSON
-		var params map[string]interface{}
+		var params map[string]any
 		if err := json.Unmarshal(tool.Function.Parameters, &params); err != nil {
 			return fmt.Errorf("tools[%d]: invalid JSON parameters: %w", i, err)
 		}

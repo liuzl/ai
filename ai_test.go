@@ -189,16 +189,16 @@ func TestSystemPrompt(t *testing.T) {
 			name:     "OpenAI",
 			provider: ai.ProviderOpenAI,
 			verifier: func(t *testing.T, r *http.Request) {
-				var reqBody map[string]interface{}
+				var reqBody map[string]any
 				body, _ := io.ReadAll(r.Body)
 				if err := json.Unmarshal(body, &reqBody); err != nil {
 					t.Fatalf("Failed to unmarshal request body: %v", err)
 				}
-				messages := reqBody["messages"].([]interface{})
+				messages := reqBody["messages"].([]any)
 				if len(messages) < 2 { // System + User
 					t.Fatalf("Expected at least 2 messages, but got %d", len(messages))
 				}
-				firstMessage := messages[0].(map[string]interface{})
+				firstMessage := messages[0].(map[string]any)
 				if firstMessage["role"] != "system" {
 					t.Errorf("Expected first message role to be 'system', got '%s'", firstMessage["role"])
 				}
@@ -211,20 +211,20 @@ func TestSystemPrompt(t *testing.T) {
 			name:     "Gemini",
 			provider: ai.ProviderGemini,
 			verifier: func(t *testing.T, r *http.Request) {
-				var reqBody map[string]interface{}
+				var reqBody map[string]any
 				body, _ := io.ReadAll(r.Body)
 				if err := json.Unmarshal(body, &reqBody); err != nil {
 					t.Fatalf("Failed to unmarshal request body: %v", err)
 				}
-				sysInstruction, ok := reqBody["systemInstruction"].(map[string]interface{})
+				sysInstruction, ok := reqBody["systemInstruction"].(map[string]any)
 				if !ok {
 					t.Fatal("Expected 'systemInstruction' field in request body")
 				}
-				parts := sysInstruction["parts"].([]interface{})
+				parts := sysInstruction["parts"].([]any)
 				if len(parts) == 0 {
 					t.Fatal("Expected parts in systemInstruction, but got none")
 				}
-				firstPart := parts[0].(map[string]interface{})
+				firstPart := parts[0].(map[string]any)
 				if firstPart["text"] != systemPrompt {
 					t.Errorf("Expected system prompt text to be '%s', got '%s'", systemPrompt, firstPart["text"])
 				}
