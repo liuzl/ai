@@ -115,7 +115,15 @@ func runMultiImageExample(client ai.Client) {
 
 // downloadImageAsBase64 downloads an image from a URL and returns it as base64
 func downloadImageAsBase64(url string) (string, error) {
-	resp, err := http.Get(url)
+	// Create request with User-Agent to avoid 403 errors
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; AI-Vision-Example/1.0)")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to download image: %w", err)
 	}
