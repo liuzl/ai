@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 
 	"github.com/liuzl/ai"
 )
@@ -60,15 +62,23 @@ func runImageURLExample(client ai.Client) {
 }
 
 func runImageBase64Example(client ai.Client) {
-	// For this example, we'll create a simple 1x1 red pixel PNG
-	// In a real application, you would read an actual image file
-	redPixelPNG := createRedPixelPNG()
+	// For this example, we'll download an image and convert it to base64
+	// This demonstrates how to use base64-encoded images
+	// In a real application, you would typically read from a local file
+
+	fmt.Println("Downloading image for base64 example...")
+	imageBase64, err := downloadImageAsBase64("https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Cat_poster_1.jpg/640px-Cat_poster_1.jpg")
+	if err != nil {
+		log.Printf("Error downloading image: %v", err)
+		log.Println("Falling back to simple test pattern...")
+		imageBase64 = createTestPattern()
+	}
 
 	req := &ai.Request{
 		Messages: []ai.Message{
 			ai.NewMultimodalMessage(ai.RoleUser, []ai.ContentPart{
-				ai.NewTextPart("What color is this image?"),
-				ai.NewImagePartFromBase64(redPixelPNG, "png"),
+				ai.NewTextPart("Describe this image in detail. What do you see?"),
+				ai.NewImagePartFromBase64(imageBase64, "jpeg"),
 			}),
 		},
 	}
@@ -103,18 +113,50 @@ func runMultiImageExample(client ai.Client) {
 	fmt.Printf("Response: %s\n", resp.Text)
 }
 
-// createRedPixelPNG creates a base64-encoded 1x1 red pixel PNG
-func createRedPixelPNG() string {
-	// This is a minimal valid PNG file (1x1 red pixel)
+// downloadImageAsBase64 downloads an image from a URL and returns it as base64
+func downloadImageAsBase64(url string) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("failed to download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	imageBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read image: %w", err)
+	}
+
+	return base64.StdEncoding.EncodeToString(imageBytes), nil
+}
+
+// createTestPattern creates a simple colorful test pattern (red and blue stripes)
+// This is used as a fallback if the real image download fails
+func createTestPattern() string {
+	// Create a simple 8x8 PNG with red and blue stripes
+	// This is a valid PNG but still simple enough to embed
 	pngBytes := []byte{
-		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
-		0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
-		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xDE,
-		0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, // IDAT chunk (red pixel)
-		0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00,
-		0x03, 0x01, 0x01, 0x00, 0x18, 0xDD, 0x8D, 0xB4,
-		0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, // IEND chunk
+		// PNG signature
+		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+		// IHDR chunk (8x8 image, RGB)
+		0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x08,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x4C, 0x11, 0xF0, 0xF3,
+		// IDAT chunk with compressed pixel data (red and blue stripes)
+		0x00, 0x00, 0x00, 0x38, 0x49, 0x44, 0x41, 0x54,
+		0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0xF0, 0x9F,
+		0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x19,
+		0x18, 0x18, 0x18, 0x18, 0x18, 0x98, 0x81, 0x81,
+		0x81, 0x81, 0x81, 0x81, 0x81, 0x19, 0x18, 0x18,
+		0x18, 0x18, 0x18, 0x98, 0x81, 0x81, 0x81, 0x81,
+		0x81, 0x81, 0x81, 0x19, 0x18, 0x18, 0x18, 0x18,
+		0x18, 0x98, 0x81, 0x01, 0x00, 0x94, 0xB4, 0x0D,
+		0x27, 0x99, 0xAE, 0xD6, 0x35,
+		// IEND chunk
+		0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44,
 		0xAE, 0x42, 0x60, 0x82,
 	}
 	return base64.StdEncoding.EncodeToString(pngBytes)
