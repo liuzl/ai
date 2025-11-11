@@ -12,7 +12,7 @@ type anthropicAdapter struct{}
 func (a *anthropicAdapter) getModel(req *Request) string {
 	if req.Model == "" {
 		// A reasonable default, user can override.
-		return "claude-3-haiku-20240307"
+		return "claude-haiku-4-5"
 	}
 	return req.Model
 }
@@ -117,6 +117,12 @@ func (a *anthropicAdapter) buildRequestPayload(req *Request) (any, error) {
 								Source: source,
 							})
 						}
+					case ContentTypeAudio:
+						return nil, fmt.Errorf("anthropic provider does not support audio input (content type: audio). Supported providers: Gemini")
+					case ContentTypeVideo:
+						return nil, fmt.Errorf("anthropic provider does not support video input (content type: video). Supported providers: Gemini")
+					default:
+						return nil, fmt.Errorf("anthropic provider does not support content type: %s", part.Type)
 					}
 				}
 			} else if msg.Content != "" {

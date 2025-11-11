@@ -11,7 +11,7 @@ type openaiAdapter struct{}
 
 func (a *openaiAdapter) getModel(req *Request) string {
 	if req.Model == "" {
-		return "gpt-4o-mini"
+		return "gpt-5-mini"
 	}
 	return req.Model
 }
@@ -60,6 +60,14 @@ func (a *openaiAdapter) buildRequestPayload(req *Request) (any, error) {
 							},
 						})
 					}
+				case ContentTypeAudio:
+					return nil, fmt.Errorf("OpenAI provider does not support audio input (content type: audio). Supported providers: Gemini")
+				case ContentTypeVideo:
+					return nil, fmt.Errorf("OpenAI provider does not support video input (content type: video). Supported providers: Gemini")
+				case ContentTypeDocument:
+					return nil, fmt.Errorf("OpenAI provider does not support document/PDF input (content type: document). Supported providers: Gemini, Anthropic")
+				default:
+					return nil, fmt.Errorf("OpenAI provider does not support content type: %s", part.Type)
 				}
 			}
 			openaiMsg.Content = parts

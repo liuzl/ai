@@ -180,6 +180,8 @@ func (a *geminiAdapter) buildRequestPayload(req *Request) (any, error) {
 								})
 							}
 						}
+					default:
+						return nil, fmt.Errorf("gemini provider does not support content type: %s", part.Type)
 					}
 				}
 			} else if msg.Content != "" {
