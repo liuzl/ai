@@ -46,13 +46,14 @@ func newBaseClient(provider, baseURL, apiVersion string, timeout time.Duration, 
 // doRequestRaw performs an HTTP request and returns the raw response body bytes.
 // It handles retries with exponential backoff and jitter on 5xx server errors.
 func (c *baseClient) doRequestRaw(ctx context.Context, method, path string, reqBody any) ([]byte, error) {
-	var body io.Reader
+	// Marshal JSON once for reuse across retries
+	var jsonBody []byte
 	if reqBody != nil {
-		jsonBody, err := json.Marshal(reqBody)
+		var err error
+		jsonBody, err = json.Marshal(reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal request body: %w", err)
 		}
-		body = bytes.NewReader(jsonBody)
 	}
 
 	u, err := url.Parse(c.baseURL)
@@ -64,30 +65,45 @@ func (c *baseClient) doRequestRaw(ctx context.Context, method, path string, reqB
 		return nil, fmt.Errorf("failed to join URL path: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, method, u.String(), body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	httpReq.Header = c.headers
-
 	var httpResp *http.Response
 	baseDelay := 1 * time.Second
 	maxDelay := 30 * time.Second
 	for attempt := range c.maxRetries {
+		// Create a new request body for each attempt
+		var body io.Reader
+		if jsonBody != nil {
+			body = bytes.NewReader(jsonBody)
+		}
+
+		httpReq, reqErr := http.NewRequestWithContext(ctx, method, u.String(), body)
+		if reqErr != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %w", reqErr)
+		}
+		httpReq.Header = c.headers
+
 		httpResp, err = c.httpClient.Do(httpReq)
 		if err == nil && httpResp.StatusCode < 500 {
 			break // Success or non-retriable error
 		}
+		// Close response body if we're going to retry (not the last attempt)
+		if attempt < c.maxRetries-1 && httpResp != nil && httpResp.Body != nil {
+			httpResp.Body.Close()
+		}
 		if attempt < c.maxRetries-1 {
-			// Calculate backoff duration
-			backoff := baseDelay * (1 << attempt) // 2^attempt
-			if backoff > maxDelay {
-				backoff = maxDelay
-			}
+			// Calculate backoff duration 2^attempt
+			backoff := min(baseDelay*(1<<attempt), maxDelay)
 			// Add jitter (randomness) to avoid thundering herd
 			jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
 			sleepDuration := backoff + jitter
-			time.Sleep(sleepDuration)
+
+			// Sleep with context cancellation support
+			select {
+			case <-time.After(sleepDuration):
+				// Continue to next retry
+			case <-ctx.Done():
+				// Context cancelled, return immediately
+				return nil, fmt.Errorf("request canceled during retry: %w", ctx.Err())
+			}
 		}
 	}
 	if err != nil {
@@ -101,6 +117,9 @@ func (c *baseClient) doRequestRaw(ctx context.Context, method, path string, reqB
 		}
 		// Network error (connection refused, DNS, etc.)
 		return nil, NewNetworkError(c.provider, err.Error(), err)
+	}
+	if httpResp == nil {
+		return nil, fmt.Errorf("received nil response without error")
 	}
 	defer httpResp.Body.Close()
 
