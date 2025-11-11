@@ -86,6 +86,100 @@ func (a *geminiAdapter) buildRequestPayload(req *Request) (any, error) {
 								})
 							}
 						}
+					case ContentTypeAudio:
+						if part.AudioSource != nil {
+							var data string
+							format := part.AudioSource.Format
+
+							switch part.AudioSource.Type {
+							case MediaSourceTypeBase64:
+								data = part.AudioSource.Data
+							case MediaSourceTypeURL:
+								// Download audio from URL
+								ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+								defer cancel()
+								downloaded, err := downloadMediaToBase64(ctx, part.AudioSource.URL)
+								if err != nil {
+									return nil, fmt.Errorf("failed to download audio from URL for Gemini: %w", err)
+								}
+								data = downloaded
+							}
+
+							if data != "" {
+								// Determine MIME type based on format
+								mimeType := "audio/" + format
+								if format == "mp3" {
+									mimeType = "audio/mpeg"
+								}
+								parts = append(parts, geminiPart{
+									InlineData: &geminiInlineData{
+										MimeType: mimeType,
+										Data:     data,
+									},
+								})
+							}
+						}
+					case ContentTypeVideo:
+						if part.VideoSource != nil {
+							var data string
+							format := part.VideoSource.Format
+
+							switch part.VideoSource.Type {
+							case MediaSourceTypeBase64:
+								data = part.VideoSource.Data
+							case MediaSourceTypeURL:
+								// Download video from URL
+								ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+								defer cancel()
+								downloaded, err := downloadMediaToBase64(ctx, part.VideoSource.URL)
+								if err != nil {
+									return nil, fmt.Errorf("failed to download video from URL for Gemini: %w", err)
+								}
+								data = downloaded
+							}
+
+							if data != "" {
+								// Determine MIME type based on format
+								mimeType := "video/" + format
+								if format == "3gpp" {
+									mimeType = "video/3gpp"
+								}
+								parts = append(parts, geminiPart{
+									InlineData: &geminiInlineData{
+										MimeType: mimeType,
+										Data:     data,
+									},
+								})
+							}
+						}
+					case ContentTypeDocument:
+						if part.DocumentSource != nil {
+							var data string
+							mimeType := part.DocumentSource.MimeType
+
+							switch part.DocumentSource.Type {
+							case MediaSourceTypeBase64:
+								data = part.DocumentSource.Data
+							case MediaSourceTypeURL:
+								// Download document from URL
+								ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+								defer cancel()
+								downloaded, err := downloadMediaToBase64(ctx, part.DocumentSource.URL)
+								if err != nil {
+									return nil, fmt.Errorf("failed to download document from URL for Gemini: %w", err)
+								}
+								data = downloaded
+							}
+
+							if data != "" && mimeType != "" {
+								parts = append(parts, geminiPart{
+									InlineData: &geminiInlineData{
+										MimeType: mimeType,
+										Data:     data,
+									},
+								})
+							}
+						}
 					}
 				}
 			} else if msg.Content != "" {

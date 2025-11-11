@@ -79,6 +79,27 @@ func (r *Request) Validate() error {
 				if err := validateImageSource(part.ImageSource, i, j); err != nil {
 					return err
 				}
+			case ContentTypeAudio:
+				if part.AudioSource == nil {
+					return fmt.Errorf("message[%d].content_parts[%d]: audio part must have audio source", i, j)
+				}
+				if err := validateMediaSource(part.AudioSource.Type == MediaSourceTypeURL, part.AudioSource.URL, part.AudioSource.Data, "audio", i, j); err != nil {
+					return err
+				}
+			case ContentTypeVideo:
+				if part.VideoSource == nil {
+					return fmt.Errorf("message[%d].content_parts[%d]: video part must have video source", i, j)
+				}
+				if err := validateMediaSource(part.VideoSource.Type == MediaSourceTypeURL, part.VideoSource.URL, part.VideoSource.Data, "video", i, j); err != nil {
+					return err
+				}
+			case ContentTypeDocument:
+				if part.DocumentSource == nil {
+					return fmt.Errorf("message[%d].content_parts[%d]: document part must have document source", i, j)
+				}
+				if err := validateMediaSource(part.DocumentSource.Type == MediaSourceTypeURL, part.DocumentSource.URL, part.DocumentSource.Data, "document", i, j); err != nil {
+					return err
+				}
 			default:
 				return fmt.Errorf("message[%d].content_parts[%d]: invalid content type %q", i, j, part.Type)
 			}
@@ -143,6 +164,20 @@ func validateImageSource(src *ImageSource, msgIdx, partIdx int) error {
 	return nil
 }
 
+// validateMediaSource validates a media source (audio, video, document)
+func validateMediaSource(isURL bool, url, data, mediaType string, msgIdx, partIdx int) error {
+	if isURL {
+		if strings.TrimSpace(url) == "" {
+			return fmt.Errorf("message[%d].content_parts[%d]: %s URL cannot be empty", msgIdx, partIdx, mediaType)
+		}
+	} else {
+		if strings.TrimSpace(data) == "" {
+			return fmt.Errorf("message[%d].content_parts[%d]: %s data cannot be empty", msgIdx, partIdx, mediaType)
+		}
+	}
+	return nil
+}
+
 // Response is a universal response structure.
 type Response struct {
 	Text      string
@@ -163,15 +198,21 @@ const (
 type ContentType string
 
 const (
-	ContentTypeText  ContentType = "text"
-	ContentTypeImage ContentType = "image"
+	ContentTypeText     ContentType = "text"
+	ContentTypeImage    ContentType = "image"
+	ContentTypeAudio    ContentType = "audio"
+	ContentTypeVideo    ContentType = "video"
+	ContentTypeDocument ContentType = "document"
 )
 
-// ContentPart represents a part of multimodal content (text, image, etc.).
+// ContentPart represents a part of multimodal content (text, image, audio, video, document, etc.).
 type ContentPart struct {
-	Type        ContentType
-	Text        string       // For text parts
-	ImageSource *ImageSource // For image parts
+	Type           ContentType
+	Text           string          // For text parts
+	ImageSource    *ImageSource    // For image parts
+	AudioSource    *AudioSource    // For audio parts
+	VideoSource    *VideoSource    // For video parts
+	DocumentSource *DocumentSource // For document parts (PDF, etc.)
 }
 
 // ImageSourceType defines how an image is provided.
@@ -188,6 +229,41 @@ type ImageSource struct {
 	URL    string          // HTTP(S) URL to the image
 	Data   string          // Base64-encoded image data (with or without data URI prefix)
 	Format string          // Image format: "png", "jpeg", "gif", "webp" (optional, can be auto-detected)
+}
+
+// MediaSourceType defines how media (audio/video/document) is provided.
+type MediaSourceType string
+
+const (
+	MediaSourceTypeURL    MediaSourceType = "url"
+	MediaSourceTypeBase64 MediaSourceType = "base64"
+)
+
+// AudioSource represents an audio input for audio-enabled models (primarily Gemini).
+// Supported formats: MP3, WAV, AIFF, AAC, OGG, FLAC
+type AudioSource struct {
+	Type   MediaSourceType // "url" or "base64"
+	URL    string          // HTTP(S) URL to the audio file
+	Data   string          // Base64-encoded audio data
+	Format string          // Audio format: "mp3", "wav", "aiff", "aac", "ogg", "flac"
+}
+
+// VideoSource represents a video input for video-enabled models (primarily Gemini).
+// Supported formats: MP4, MPEG, MOV, AVI, FLV, MPG, WEBM, WMV, 3GPP
+type VideoSource struct {
+	Type   MediaSourceType // "url" or "base64"
+	URL    string          // HTTP(S) URL to the video file
+	Data   string          // Base64-encoded video data
+	Format string          // Video format: "mp4", "mpeg", "mov", "avi", "flv", "webm", etc.
+}
+
+// DocumentSource represents a document input (primarily PDF).
+// Supported by Gemini and Anthropic.
+type DocumentSource struct {
+	Type     MediaSourceType // "url" or "base64"
+	URL      string          // HTTP(S) URL to the document
+	Data     string          // Base64-encoded document data
+	MimeType string          // MIME type: "application/pdf", etc.
 }
 
 // Message represents a universal message structure.
@@ -447,4 +523,95 @@ func NewImagePartFromBase64(data, format string) ContentPart {
 			Format: format,
 		},
 	}
+}
+
+// NewAudioPartFromURL creates an audio content part from a URL.
+// Supported formats: mp3, wav, aiff, aac, ogg, flac
+// Primarily supported by Gemini models.
+func NewAudioPartFromURL(url, format string) ContentPart {
+	return ContentPart{
+		Type: ContentTypeAudio,
+		AudioSource: &AudioSource{
+			Type:   MediaSourceTypeURL,
+			URL:    url,
+			Format: format,
+		},
+	}
+}
+
+// NewAudioPartFromBase64 creates an audio content part from base64-encoded data.
+// The format parameter specifies the audio format (e.g., "mp3", "wav", "ogg").
+func NewAudioPartFromBase64(data, format string) ContentPart {
+	return ContentPart{
+		Type: ContentTypeAudio,
+		AudioSource: &AudioSource{
+			Type:   MediaSourceTypeBase64,
+			Data:   data,
+			Format: format,
+		},
+	}
+}
+
+// NewVideoPartFromURL creates a video content part from a URL.
+// Supported formats: mp4, mpeg, mov, avi, flv, mpg, webm, wmv, 3gpp
+// Primarily supported by Gemini models.
+func NewVideoPartFromURL(url, format string) ContentPart {
+	return ContentPart{
+		Type: ContentTypeVideo,
+		VideoSource: &VideoSource{
+			Type:   MediaSourceTypeURL,
+			URL:    url,
+			Format: format,
+		},
+	}
+}
+
+// NewVideoPartFromBase64 creates a video content part from base64-encoded data.
+// The format parameter specifies the video format (e.g., "mp4", "webm").
+func NewVideoPartFromBase64(data, format string) ContentPart {
+	return ContentPart{
+		Type: ContentTypeVideo,
+		VideoSource: &VideoSource{
+			Type:   MediaSourceTypeBase64,
+			Data:   data,
+			Format: format,
+		},
+	}
+}
+
+// NewDocumentPartFromURL creates a document content part from a URL.
+// Primarily used for PDF documents.
+// Supported by Gemini and Anthropic models.
+func NewDocumentPartFromURL(url, mimeType string) ContentPart {
+	return ContentPart{
+		Type: ContentTypeDocument,
+		DocumentSource: &DocumentSource{
+			Type:     MediaSourceTypeURL,
+			URL:      url,
+			MimeType: mimeType,
+		},
+	}
+}
+
+// NewDocumentPartFromBase64 creates a document content part from base64-encoded data.
+// The mimeType parameter should be "application/pdf" for PDF documents.
+func NewDocumentPartFromBase64(data, mimeType string) ContentPart {
+	return ContentPart{
+		Type: ContentTypeDocument,
+		DocumentSource: &DocumentSource{
+			Type:     MediaSourceTypeBase64,
+			Data:     data,
+			MimeType: mimeType,
+		},
+	}
+}
+
+// NewPDFPartFromURL is a convenience function for creating a PDF document part from a URL.
+func NewPDFPartFromURL(url string) ContentPart {
+	return NewDocumentPartFromURL(url, "application/pdf")
+}
+
+// NewPDFPartFromBase64 is a convenience function for creating a PDF document part from base64 data.
+func NewPDFPartFromBase64(data string) ContentPart {
+	return NewDocumentPartFromBase64(data, "application/pdf")
 }

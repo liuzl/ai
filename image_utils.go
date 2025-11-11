@@ -92,3 +92,43 @@ func detectImageFormat(contentType, imageURL string) string {
 	// Default to png
 	return "png"
 }
+
+// downloadMediaToBase64 downloads media (audio, video, document) from a URL and converts it to base64.
+// This is a generic function for downloading any media type.
+func downloadMediaToBase64(ctx context.Context, mediaURL string) (string, error) {
+	// Create HTTP client with context timeout
+	client := &http.Client{}
+
+	// Create request with context
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mediaURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create media download request: %w", err)
+	}
+
+	// Set User-Agent to avoid 403 errors
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; AI-Library/1.0; +https://github.com/liuzl/ai)")
+	req.Header.Set("Accept", "*/*")
+
+	// Execute request
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to download media from URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check status code
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download media: HTTP %d", resp.StatusCode)
+	}
+
+	// Read media data
+	mediaData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read media data: %w", err)
+	}
+
+	// Encode to base64
+	base64Data := base64.StdEncoding.EncodeToString(mediaData)
+
+	return base64Data, nil
+}

@@ -35,3 +35,6 @@ go.work.sum
 # Compiled binaries (in root directory)
 /api-proxy
 /universal_proxy_demo
+/audio_chat
+/video_chat
+/pdf_chat

@@ -86,6 +86,37 @@ func (a *anthropicAdapter) buildRequestPayload(req *Request) (any, error) {
 								Source: source,
 							})
 						}
+					case ContentTypeDocument:
+						if part.DocumentSource != nil {
+							// Anthropic supports PDF documents
+							mediaType := part.DocumentSource.MimeType
+							if mediaType == "" {
+								mediaType = "application/pdf"
+							}
+
+							source := &anthropicImageSource{MediaType: mediaType}
+							switch part.DocumentSource.Type {
+							case MediaSourceTypeURL:
+								source.Type = "url"
+								source.URL = part.DocumentSource.URL
+							case MediaSourceTypeBase64:
+								source.Type = "base64"
+								data := part.DocumentSource.Data
+								// Remove data URI prefix if present
+								if strings.HasPrefix(data, "data:") {
+									if idx := strings.Index(data, ","); idx != -1 {
+										data = data[idx+1:]
+									}
+								}
+								source.Data = data
+							}
+
+							// Anthropic uses "document" type for PDFs
+							contentBlocks = append(contentBlocks, anthropicContentBlock{
+								Type:   "document",
+								Source: source,
+							})
+						}
 					}
 				}
 			} else if msg.Content != "" {
