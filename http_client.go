@@ -3,11 +3,11 @@ package ai
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -79,7 +79,8 @@ func (c *baseClient) doRequestRaw(ctx context.Context, method, path string, reqB
 		if reqErr != nil {
 			return nil, fmt.Errorf("failed to create HTTP request: %w", reqErr)
 		}
-		httpReq.Header = c.headers
+		// Clone headers to prevent race conditions and request corruption
+		httpReq.Header = c.headers.Clone()
 
 		httpResp, err = c.httpClient.Do(httpReq)
 		if err == nil && httpResp.StatusCode < 500 {
@@ -93,7 +94,11 @@ func (c *baseClient) doRequestRaw(ctx context.Context, method, path string, reqB
 			// Calculate backoff duration 2^attempt
 			backoff := min(baseDelay*(1<<attempt), maxDelay)
 			// Add jitter (randomness) to avoid thundering herd
-			jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
+			// Use crypto/rand for unpredictable jitter
+			randomBytes := make([]byte, 2)
+			_, _ = rand.Read(randomBytes)                             // Ignore error - worst case is 0 jitter
+			jitterMs := int(randomBytes[0])<<8 | int(randomBytes[1])  // 0-65535
+			jitter := time.Duration(jitterMs%1000) * time.Millisecond // 0-999ms
 			sleepDuration := backoff + jitter
 
 			// Sleep with context cancellation support
@@ -138,7 +143,9 @@ func (c *baseClient) doRequestRaw(ctx context.Context, method, path string, reqB
 		}
 		errorMessage := string(respBodyBytes)
 		errorDetails := ""
-		if json.Unmarshal(respBodyBytes, &apiError) == nil && apiError.Error.Message != "" {
+		// Use explicit error variable for clarity
+		err := json.Unmarshal(respBodyBytes, &apiError)
+		if err == nil && apiError.Error.Message != "" {
 			errorMessage = apiError.Error.Message
 			errorDetails = apiError.Error.Type
 		}

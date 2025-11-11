@@ -56,8 +56,8 @@ func (m *ToolServerManager) LoadFromFile(configFile string) error {
 			return fmt.Errorf("failed to create client for '%s': %w", name, err)
 		}
 		m.mu.Lock()
+		defer m.mu.Unlock()
 		m.clients[name] = client
-		m.mu.Unlock()
 	}
 	return nil
 }
