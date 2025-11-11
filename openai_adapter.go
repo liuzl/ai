@@ -21,7 +21,7 @@ func (a *openaiAdapter) getEndpoint(model string) string {
 }
 
 func (a *openaiAdapter) buildRequestPayload(req *Request) (any, error) {
-	openaiReq := &openaiChatCompletionRequest{
+	openaiReq := &OpenAIChatCompletionRequest{
 		Model:    a.getModel(req),
 		Messages: make([]openaiMessage, len(req.Messages)),
 	}
@@ -153,10 +153,12 @@ func (a *openaiAdapter) parseResponse(providerResp []byte) (*Response, error) {
 	return universalResp, nil
 }
 
-// --- Private OpenAI Specific Types ---
-// (These are the same structs from the original client_openai.go)
+// --- OpenAI Specific Types ---
+// These types are exported to allow format conversion and proxy server usage.
 
-type openaiChatCompletionRequest struct {
+// OpenAIChatCompletionRequest represents an OpenAI chat completion request.
+// This type is exported to enable format conversion in the proxy server.
+type OpenAIChatCompletionRequest struct {
 	Model    string          `json:"model"`
 	Messages []openaiMessage `json:"messages"`
 	Tools    []openaiTool    `json:"tools,omitempty"`
@@ -203,11 +205,24 @@ type openaiFunctionDefinition struct {
 }
 
 type openaiChatCompletionResponse struct {
+	ID      string         `json:"id"`
+	Object  string         `json:"object"`
+	Created int64          `json:"created"`
+	Model   string         `json:"model"`
 	Choices []openaiChoice `json:"choices"`
+	Usage   *openaiUsage   `json:"usage,omitempty"`
 }
 
 type openaiChoice struct {
-	Message openaiMessage `json:"message"`
+	Index        int           `json:"index"`
+	Message      openaiMessage `json:"message"`
+	FinishReason string        `json:"finish_reason,omitempty"`
+}
+
+type openaiUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 // formatBase64AsDataURI formats base64 image data as a data URI.
