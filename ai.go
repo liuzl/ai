@@ -34,6 +34,115 @@ type Request struct {
 	Tools        []Tool
 }
 
+// Validate checks if the request is valid and returns an error if not.
+// This method validates all request fields before sending to the API.
+func (r *Request) Validate() error {
+	// Check messages is not empty
+	if len(r.Messages) == 0 {
+		return fmt.Errorf("request must have at least one message")
+	}
+
+	// Validate each message
+	for i, msg := range r.Messages {
+		// Check role is valid
+		switch msg.Role {
+		case RoleSystem, RoleUser, RoleAssistant, RoleTool:
+			// Valid role
+		default:
+			return fmt.Errorf("message[%d]: invalid role %q (must be system, user, assistant, or tool)", i, msg.Role)
+		}
+
+		// Check message has content or tool calls
+		hasContent := msg.Content != "" || len(msg.ContentParts) > 0
+		hasToolCalls := len(msg.ToolCalls) > 0
+
+		if !hasContent && !hasToolCalls {
+			return fmt.Errorf("message[%d]: must have either content or tool calls", i)
+		}
+
+		// Tool role messages must have ToolCallID
+		if msg.Role == RoleTool && msg.ToolCallID == "" {
+			return fmt.Errorf("message[%d]: tool role message must have tool_call_id", i)
+		}
+
+		// Validate content parts if present
+		for j, part := range msg.ContentParts {
+			switch part.Type {
+			case ContentTypeText:
+				if strings.TrimSpace(part.Text) == "" {
+					return fmt.Errorf("message[%d].content_parts[%d]: text content cannot be empty", i, j)
+				}
+			case ContentTypeImage:
+				if part.ImageSource == nil {
+					return fmt.Errorf("message[%d].content_parts[%d]: image part must have image source", i, j)
+				}
+				if err := validateImageSource(part.ImageSource, i, j); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("message[%d].content_parts[%d]: invalid content type %q", i, j, part.Type)
+			}
+		}
+
+		// Validate tool calls
+		for j, tc := range msg.ToolCalls {
+			if strings.TrimSpace(tc.Function) == "" {
+				return fmt.Errorf("message[%d].tool_calls[%d]: function name cannot be empty", i, j)
+			}
+			if strings.TrimSpace(tc.Arguments) == "" {
+				return fmt.Errorf("message[%d].tool_calls[%d]: arguments cannot be empty", i, j)
+			}
+			// Validate arguments is valid JSON
+			var args map[string]interface{}
+			if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
+				return fmt.Errorf("message[%d].tool_calls[%d]: invalid JSON arguments: %w", i, j, err)
+			}
+		}
+	}
+
+	// Validate tools if present
+	for i, tool := range r.Tools {
+		if strings.TrimSpace(tool.Type) == "" {
+			return fmt.Errorf("tools[%d]: type cannot be empty", i)
+		}
+		if strings.TrimSpace(tool.Function.Name) == "" {
+			return fmt.Errorf("tools[%d]: function name cannot be empty", i)
+		}
+		if len(tool.Function.Parameters) == 0 {
+			return fmt.Errorf("tools[%d]: function parameters cannot be empty", i)
+		}
+		// Validate parameters is valid JSON
+		var params map[string]interface{}
+		if err := json.Unmarshal(tool.Function.Parameters, &params); err != nil {
+			return fmt.Errorf("tools[%d]: invalid JSON parameters: %w", i, err)
+		}
+	}
+
+	// Model validation (if specified)
+	if r.Model != "" && strings.TrimSpace(r.Model) == "" {
+		return fmt.Errorf("model cannot be whitespace only")
+	}
+
+	return nil
+}
+
+// validateImageSource validates an image source
+func validateImageSource(src *ImageSource, msgIdx, partIdx int) error {
+	switch src.Type {
+	case ImageSourceTypeURL:
+		if strings.TrimSpace(src.URL) == "" {
+			return fmt.Errorf("message[%d].content_parts[%d]: image URL cannot be empty", msgIdx, partIdx)
+		}
+	case ImageSourceTypeBase64:
+		if strings.TrimSpace(src.Data) == "" {
+			return fmt.Errorf("message[%d].content_parts[%d]: image data cannot be empty", msgIdx, partIdx)
+		}
+	default:
+		return fmt.Errorf("message[%d].content_parts[%d]: invalid image source type %q", msgIdx, partIdx, src.Type)
+	}
+	return nil
+}
+
 // Response is a universal response structure.
 type Response struct {
 	Text      string

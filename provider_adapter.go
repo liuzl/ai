@@ -32,6 +32,11 @@ type genericClient struct {
 
 // Generate implements the core logic for the Client interface.
 func (c *genericClient) Generate(ctx context.Context, req *Request) (*Response, error) {
+	// 0. Validate the request before processing
+	if err := req.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid request: %w", err)
+	}
+
 	// 1. Build the provider-specific request payload using the adapter.
 	payload, err := c.adapter.buildRequestPayload(req)
 	if err != nil {
