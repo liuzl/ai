@@ -18,14 +18,13 @@ import (
 //
 // AI_PROVIDER=openai
 // OPENAI_API_KEY="your-api-key-here"
-// OPENAI_MODEL="gpt-4o-mini"
+// OPENAI_MODEL="gpt-5-mini"
 //
 // Or for Gemini:
 //
 // AI_PROVIDER=gemini
 // GEMINI_API_KEY="your-api-key-here"
-// GEMINI_MODEL="gemini-1.5-flash"
-//
+// GEMINI_MODEL="gemini-2.5-flash"
 func main() {
 	// Load .env file from the root directory.
 	// It's okay if it fails, we'll just use the environment variables that are set.
