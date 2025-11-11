@@ -24,6 +24,10 @@ func downloadImageToBase64(ctx context.Context, imageURL string, timeout time.Du
 		return "", "", fmt.Errorf("failed to create image download request: %w", err)
 	}
 
+	// Set User-Agent to avoid 403 errors from servers that block requests without it
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; AI-Library/1.0; +https://github.com/liuzl/ai)")
+	req.Header.Set("Accept", "image/*")
+
 	// Execute request
 	resp, err := client.Do(req)
 	if err != nil {
