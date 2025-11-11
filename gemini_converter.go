@@ -160,12 +160,8 @@ func (c *GeminiFormatConverter) ConvertRequestToUniversal(geminiReq *GeminiGener
 		for _, tool := range geminiReq.Tools {
 			for _, fnDecl := range tool.FunctionDeclarations {
 				universalReq.Tools = append(universalReq.Tools, Tool{
-					Type: "function",
-					Function: FunctionDefinition{
-						Name:        fnDecl.Name,
-						Description: fnDecl.Description,
-						Parameters:  fnDecl.Parameters,
-					},
+					Type:     "function",
+					Function: FunctionDefinition(fnDecl),
 				})
 			}
 		}
