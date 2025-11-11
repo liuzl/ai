@@ -9,9 +9,11 @@ It also features built-in support for the [Model-Context Protocol (MCP)](https:/
 - **Unified Client Interface**: A single `ai.Client` interface for Google Gemini, OpenAI, and Anthropic.
 - **Provider-Agnostic API**: Universal `Request`, `Response`, and `Message` structs for consistent interaction.
 - **Simplified Configuration**: Easily configure clients using environment variables or functional options.
+- **Multimodal Support**: Support for text, images, audio, video, and PDF documents with automatic format handling.
 - **First-Class Tool Support**: Abstracted support for function calling (tools) that works across providers.
 - **MCP Integration**: Discover, connect to, and execute tools on MCP-compliant servers.
 - **Universal API Proxy Server**: HTTP proxy server that accepts any provider's API format and routes to any provider.
+- **Error Handling**: Clear error messages when using unsupported features with specific providers.
 
 ## Installation
 
@@ -30,7 +32,7 @@ The easiest way to configure the client is by setting environment variables. The
 ### OpenAI
 
 - `OPENAI_API_KEY`: Your OpenAI API key.
-- `OPENAI_MODEL`: (Optional) The model name, e.g., `gpt-4o-mini`.
+- `OPENAI_MODEL`: (Optional) The model name, e.g., `gpt-5-mini`.
 - `OPENAI_BASE_URL`: (Optional) For using a custom or proxy endpoint.
 
 ### Google Gemini
@@ -42,7 +44,7 @@ The easiest way to configure the client is by setting environment variables. The
 ### Anthropic
 
 - `ANTHROPIC_API_KEY`: Your Anthropic API key.
-- `ANTHROPIC_MODEL`: (Optional) The model name, e.g., `claude-3-haiku-20240307`.
+- `ANTHROPIC_MODEL`: (Optional) The model name, e.g., `claude-haiku-4-5`.
 - `ANTHROPIC_BASE_URL`: (Optional) For using a custom endpoint.
 
 ## Usage
@@ -193,6 +195,120 @@ func main() {
 }
 ```
 
+## Multimodal Support
+
+The library provides comprehensive support for multiple content types beyond text, including images, audio, video, and PDF documents. Different providers support different modalities:
+
+### Supported Content Types by Provider
+
+| Content Type | OpenAI | Gemini | Anthropic | Notes |
+|-------------|--------|--------|-----------|-------|
+| **Text** | ✅ | ✅ | ✅ | Universal support |
+| **Images** | ✅ | ✅ | ✅ | PNG, JPEG, WEBP, GIF |
+| **Audio** | ❌ | ✅ | ❌ | MP3, WAV, AIFF, AAC, OGG, FLAC |
+| **Video** | ❌ | ✅ | ❌ | MP4, MPEG, MOV, AVI, FLV, WEBM, etc. |
+| **PDF Documents** | ❌ | ✅ | ✅ | Native PDF parsing |
+
+### Image Analysis Example
+
+```go
+req := &ai.Request{
+	Messages: []ai.Message{
+		ai.NewMultimodalMessage(ai.RoleUser, []ai.ContentPart{
+			ai.NewTextPart("What's in this image?"),
+			ai.NewImagePartFromURL("https://example.com/image.jpg"),
+		}),
+	},
+}
+```
+
+### Audio Analysis Example (Gemini only)
+
+```go
+req := &ai.Request{
+	Messages: []ai.Message{
+		ai.NewMultimodalMessage(ai.RoleUser, []ai.ContentPart{
+			ai.NewTextPart("Transcribe and analyze this audio"),
+			ai.NewAudioPartFromURL("https://example.com/audio.mp3"),
+		}),
+	},
+}
+```
+
+### Video Analysis Example (Gemini only)
+
+```go
+req := &ai.Request{
+	Messages: []ai.Message{
+		ai.NewMultimodalMessage(ai.RoleUser, []ai.ContentPart{
+			ai.NewTextPart("Describe what happens in this video"),
+			ai.NewVideoPartFromURL("https://example.com/video.mp4", "mp4"),
+		}),
+	},
+}
+```
+
+### PDF Document Analysis Example (Gemini & Anthropic)
+
+```go
+req := &ai.Request{
+	Messages: []ai.Message{
+		ai.NewMultimodalMessage(ai.RoleUser, []ai.ContentPart{
+			ai.NewTextPart("Summarize this research paper"),
+			ai.NewPDFPartFromURL("https://arxiv.org/pdf/1706.03762.pdf"),
+		}),
+	},
+}
+```
+
+### Using Base64-Encoded Media
+
+All media types also support base64-encoded data for local files:
+
+```go
+// Read local file
+audioData, _ := os.ReadFile("audio.mp3")
+base64Audio := base64.StdEncoding.EncodeToString(audioData)
+
+req := &ai.Request{
+	Messages: []ai.Message{
+		ai.NewMultimodalMessage(ai.RoleUser, []ai.ContentPart{
+			ai.NewTextPart("Analyze this audio"),
+			ai.NewAudioPartFromBase64(base64Audio, "mp3"),
+		}),
+	},
+}
+```
+
+### Automatic Format Handling
+
+- **Gemini**: Automatically downloads media from URLs and converts to base64
+- **Anthropic**: Supports both URL and base64 for images and PDFs
+- **OpenAI**: Supports URL and base64 for images
+
+### Error Handling
+
+The library provides clear error messages when attempting to use unsupported content types:
+
+```go
+// Trying to use audio with OpenAI will return:
+// "OpenAI provider does not support audio input (content type: audio).
+//  Supported providers: Gemini"
+```
+
+### Complete Examples
+
+See the `examples` directory for complete working examples:
+
+- **[examples/simple_chat](examples/simple_chat)** - Basic text generation
+- **[examples/vision_chat](examples/vision_chat)** - Image analysis with all providers
+- **[examples/audio_chat](examples/audio_chat)** - Audio analysis with Gemini
+- **[examples/video_chat](examples/video_chat)** - Video analysis with Gemini
+- **[examples/pdf_chat](examples/pdf_chat)** - PDF document Q&A with Gemini/Anthropic
+- **[examples/tool_server_interaction](examples/tool_server_interaction)** - MCP tool integration
+
+Each example includes detailed documentation on supported formats, use cases, and limitations.
+
 ## Universal API Proxy Server
 
 The library includes a universal HTTP proxy server that accepts **any provider's API format** and routes requests to **any supported provider**. This allows you to:
@@ -298,10 +414,15 @@ print(message.content[0].text)
 ### Supported Features
 
 ✅ All chat completion features
+
 ✅ System prompts
+
 ✅ Multi-turn conversations
+
 ✅ Tool/function calling
-✅ Vision/multimodal inputs
+
+✅ Vision/multimodal inputs (images, audio, video, PDFs)
+
 ✅ All provider combinations
 
 See the [API proxy README](cmd/api-proxy/README.md) for complete documentation, examples, and use cases.
