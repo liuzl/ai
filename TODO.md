@@ -253,9 +253,10 @@ type Message struct {
 - [x] Examples demonstrate image input usage (`examples/vision_chat/main.go`)
 
 **Implementation Notes**:
-- Gemini API limitation: HTTP(S) image URLs are not supported directly. Only base64 inline data and Google Cloud Storage URIs are supported. URL images will be silently ignored.
+- **Gemini URL Auto-Conversion**: Gemini API doesn't support HTTP(S) image URLs natively. The library now automatically downloads URL images and converts them to base64 for Gemini (added in latest update).
 - All providers handle data URI prefixes correctly (automatically stripped where needed)
-- Test coverage increased from 64.0% to 65.9%
+- Automatic image download includes timeout protection (30 seconds) and format detection
+- Test coverage increased with dedicated image utility tests
 
 ### Testing Plan
 - [x] Add `TestBackwardCompatibilityTextOnly` - backward compatibility (3 providers)
@@ -265,8 +266,10 @@ type Message struct {
 - [x] Add `TestImagePartFromBase64WithDataURI` - data URI handling (Gemini)
 - [x] Add `TestHelperFunctions` - all helper functions (5 test cases)
 - [x] Add example: `examples/vision_chat/main.go` with 3 examples
+- [x] Add `TestDownloadImageToBase64` - image download utility tests (5 test cases)
+- [x] Add `TestGeminiImageURLAutoConversion` - Gemini URL-to-base64 conversion (3 test cases)
 
-**Test Results**: ✅ All 37 tests pass (11 new multimodal tests added)
+**Test Results**: ✅ All tests pass including new image utilities and Gemini auto-conversion
 
 ---
 

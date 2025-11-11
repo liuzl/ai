@@ -1,11 +1,13 @@
 package ai
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // geminiAdapter implements the providerAdapter interface for Google Gemini.
@@ -42,20 +44,37 @@ func (a *geminiAdapter) buildRequestPayload(req *Request) (any, error) {
 						parts = append(parts, geminiPart{Text: &part.Text})
 					case ContentTypeImage:
 						if part.ImageSource != nil {
-							if part.ImageSource.Type == ImageSourceTypeBase64 {
-								// Gemini only supports inline base64 images
-								data := part.ImageSource.Data
+							var data, format string
+							var err error
+
+							switch part.ImageSource.Type {
+							case ImageSourceTypeBase64:
+								// Use provided base64 data
+								data = part.ImageSource.Data
+								format = part.ImageSource.Format
 								// Remove data URI prefix if present
 								if strings.HasPrefix(data, "data:") {
 									if idx := strings.Index(data, ","); idx != -1 {
 										data = data[idx+1:]
 									}
 								}
+							case ImageSourceTypeURL:
+								// Gemini doesn't support URLs directly, so download and convert to base64
+								// Use a background context with timeout for image download
+								ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+								defer cancel()
+								data, format, err = downloadImageToBase64(ctx, part.ImageSource.URL, 30*time.Second)
+								if err != nil {
+									return nil, fmt.Errorf("failed to download image from URL for Gemini: %w", err)
+								}
+							}
+
+							if data != "" {
 								// Determine MIME type
 								mimeType := "image/png" // default
-								if part.ImageSource.Format != "" {
-									mimeType = "image/" + part.ImageSource.Format
-									if part.ImageSource.Format == "jpg" {
+								if format != "" {
+									mimeType = "image/" + format
+									if format == "jpg" {
 										mimeType = "image/jpeg"
 									}
 								}
@@ -66,8 +85,6 @@ func (a *geminiAdapter) buildRequestPayload(req *Request) (any, error) {
 									},
 								})
 							}
-							// Note: Gemini does not support HTTP(S) image URLs directly.
-							// Only base64 inline data and Google Cloud Storage URIs are supported.
 						}
 					}
 				}
