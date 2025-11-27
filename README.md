@@ -83,15 +83,41 @@ func main() {
 	}
 
 	// Call the Generate function.
-	resp, err := client.Generate(context.Background(), req)
-	if err != nil {
-		log.Fatalf("Generate failed: %v", err)
-	}
+resp, err := client.Generate(context.Background(), req)
+if err != nil {
+	log.Fatalf("Generate failed: %v", err)
+}
 
-	// Print the result.
-	fmt.Println(resp.Text)
+// Print the result.
+fmt.Println(resp.Text)
 }
 ```
+
+### Streaming Responses
+
+Streaming is available without changing the existing `Client` interface. Use the helper `ai.Stream` and consume incremental chunks:
+
+```go
+reader, err := ai.Stream(ctx, client, req)
+if err != nil {
+	log.Fatalf("Stream failed: %v", err)
+}
+defer reader.Close()
+
+for {
+	chunk, err := reader.Recv()
+	if err == io.EOF {
+		break
+	}
+	if err != nil {
+		log.Fatalf("stream read error: %v", err)
+	}
+	fmt.Print(chunk.TextDelta)
+}
+```
+
+Currently streaming is implemented for OpenAI and Anthropic providers.
+Gemini is also supported via the `:streamGenerateContent` endpoint.
 
 ### Running the Examples
 

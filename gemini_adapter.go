@@ -24,6 +24,10 @@ func (a *geminiAdapter) getEndpoint(model string) string {
 	return fmt.Sprintf("/models/%s:generateContent", model)
 }
 
+func (a *geminiAdapter) getStreamEndpoint(model string) string {
+	return fmt.Sprintf("/models/%s:streamGenerateContent", model)
+}
+
 func (a *geminiAdapter) buildRequestPayload(req *Request) (any, error) {
 	geminiReq := &geminiGenerateContentRequest{
 		Contents: make([]geminiContent, len(req.Messages)),
@@ -316,6 +320,80 @@ func (a *geminiAdapter) parseResponse(providerResp []byte) (*Response, error) {
 	return universalResp, nil
 }
 
+func (a *geminiAdapter) enableStreaming(payload any) {
+	// Gemini uses a dedicated streaming endpoint; no payload changes needed.
+}
+
+func (a *geminiAdapter) parseStreamEvent(event *sseEvent, acc *streamAccumulator) (*StreamChunk, bool, error) {
+	if len(event.Data) == 0 {
+		return nil, false, nil
+	}
+
+	// Some implementations may send "[DONE]" or empty arrays; treat as end.
+	if string(event.Data) == "[DONE]" {
+		return &StreamChunk{Done: true}, true, nil
+	}
+
+	var chunkResp geminiStreamResponse
+	if err := json.Unmarshal(event.Data, &chunkResp); err != nil {
+		return nil, false, fmt.Errorf("failed to unmarshal gemini stream event: %w", err)
+	}
+
+	if chunkResp.Done {
+		return &StreamChunk{Done: true}, true, nil
+	}
+
+	if len(chunkResp.Candidates) == 0 {
+		return nil, false, nil
+	}
+
+	candidate := chunkResp.Candidates[0]
+	chunk := &StreamChunk{}
+
+	for _, part := range candidate.Content.Parts {
+		if part.Text != nil {
+			chunk.TextDelta += *part.Text
+		}
+		if part.FunctionCall != nil {
+			args, err := json.Marshal(part.FunctionCall.Args)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to marshal gemini stream function call args: %w", err)
+			}
+
+			// Try to reuse an existing in-progress tool call with the same function.
+			id := ""
+			for existingID, tc := range acc.toolCalls {
+				if tc.call.Function == part.FunctionCall.Name && !tc.completed {
+					id = existingID
+					break
+				}
+			}
+			if id == "" {
+				id = fmt.Sprintf("gemini-tool-call-%d", len(acc.toolCalls)+1)
+			}
+
+			chunk.ToolCallDeltas = append(chunk.ToolCallDeltas, ToolCallDelta{
+				ID:             id,
+				Type:           "function",
+				Function:       part.FunctionCall.Name,
+				ArgumentsDelta: string(args),
+				Done:           true,
+			})
+		}
+	}
+
+	done := candidate.FinishReason != ""
+	if done {
+		chunk.Done = true
+	}
+
+	if chunk.TextDelta == "" && len(chunk.ToolCallDeltas) == 0 && !chunk.Done {
+		return nil, false, nil
+	}
+
+	return chunk, done, nil
+}
+
 // --- Private Gemini Specific Types ---
 // (These are the same structs from the original client_gemini.go)
 
@@ -368,4 +446,12 @@ type geminiGenerateContentResponse struct {
 
 type geminiCandidate struct {
 	Content geminiContent `json:"content"`
+	// FinishReason is only used for streaming responses.
+	FinishReason string `json:"finishReason,omitempty"`
+}
+
+// geminiStreamResponse mirrors the streaming payload shape.
+type geminiStreamResponse struct {
+	Candidates []geminiCandidate `json:"candidates"`
+	Done       bool              `json:"done,omitempty"`
 }

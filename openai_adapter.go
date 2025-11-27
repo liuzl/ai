@@ -161,6 +161,56 @@ func (a *openaiAdapter) parseResponse(providerResp []byte) (*Response, error) {
 	return universalResp, nil
 }
 
+func (a *openaiAdapter) enableStreaming(payload any) {
+	if req, ok := payload.(*OpenAIChatCompletionRequest); ok {
+		req.Stream = true
+	}
+}
+
+func (a *openaiAdapter) parseStreamEvent(event *sseEvent, acc *streamAccumulator) (*StreamChunk, bool, error) {
+	if string(event.Data) == "[DONE]" {
+		return &StreamChunk{Done: true}, true, nil
+	}
+
+	var chunkResp openaiChatCompletionStreamResponse
+	if err := json.Unmarshal(event.Data, &chunkResp); err != nil {
+		return nil, false, fmt.Errorf("failed to parse openai stream event: %w", err)
+	}
+
+	if len(chunkResp.Choices) == 0 {
+		return nil, false, nil
+	}
+
+	choice := chunkResp.Choices[0]
+	chunk := &StreamChunk{}
+
+	for _, part := range choice.Delta.Content {
+		if part.Type == "text" {
+			chunk.TextDelta += part.Text
+		}
+	}
+
+	for _, tc := range choice.Delta.ToolCalls {
+		chunk.ToolCallDeltas = append(chunk.ToolCallDeltas, ToolCallDelta{
+			ID:             tc.ID,
+			Type:           tc.Type,
+			Function:       tc.Function.Name,
+			ArgumentsDelta: tc.Function.Arguments,
+		})
+	}
+
+	if choice.FinishReason != "" {
+		chunk.Done = true
+		return chunk, true, nil
+	}
+
+	return chunk, false, nil
+}
+
+func (a *openaiAdapter) getStreamEndpoint(model string) string {
+	return a.getEndpoint(model)
+}
+
 // --- OpenAI Specific Types ---
 // These types are exported to allow format conversion and proxy server usage.
 
@@ -170,6 +220,7 @@ type OpenAIChatCompletionRequest struct {
 	Model    string          `json:"model"`
 	Messages []openaiMessage `json:"messages"`
 	Tools    []openaiTool    `json:"tools,omitempty"`
+	Stream   bool            `json:"stream,omitempty"`
 }
 
 type openaiMessage struct {
@@ -231,6 +282,33 @@ type openaiUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+}
+
+// Streaming response types
+type openaiChatCompletionStreamResponse struct {
+	Choices []openaiStreamChoice `json:"choices"`
+}
+
+type openaiStreamChoice struct {
+	Index        int               `json:"index"`
+	Delta        openaiStreamDelta `json:"delta"`
+	FinishReason string            `json:"finish_reason"`
+}
+
+type openaiStreamDelta struct {
+	Content   []openaiContentPart   `json:"content"`
+	ToolCalls []openaiToolCallDelta `json:"tool_calls"`
+}
+
+type openaiToolCallDelta struct {
+	ID       string                  `json:"id,omitempty"`
+	Type     string                  `json:"type,omitempty"`
+	Function openaiFunctionCallDelta `json:"function"`
+}
+
+type openaiFunctionCallDelta struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 }
 
 // formatBase64AsDataURI formats base64 image data as a data URI.

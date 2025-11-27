@@ -216,6 +216,134 @@ func (a *anthropicAdapter) parseResponse(providerResp []byte) (*Response, error)
 	return universalResp, nil
 }
 
+func (a *anthropicAdapter) enableStreaming(payload any) {
+	if req, ok := payload.(*anthropicMessagesRequest); ok {
+		req.Stream = true
+	}
+}
+
+func (a *anthropicAdapter) parseStreamEvent(event *sseEvent, acc *streamAccumulator) (*StreamChunk, bool, error) {
+	if len(event.Data) == 0 {
+		return nil, false, nil
+	}
+
+	var envelope struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(event.Data, &envelope); err != nil {
+		return nil, false, fmt.Errorf("failed to parse anthropic stream envelope: %w", err)
+	}
+
+	eventType := envelope.Type
+	if eventType == "" && event.Event != "" {
+		eventType = event.Event
+	}
+
+	switch eventType {
+	case "message_stop":
+		return &StreamChunk{Done: true}, true, nil
+	case "content_block_start":
+		var payload struct {
+			Index        int                   `json:"index"`
+			ContentBlock anthropicContentBlock `json:"content_block"`
+		}
+		if err := json.Unmarshal(event.Data, &payload); err != nil {
+			return nil, false, err
+		}
+		if payload.ContentBlock.Type == "text" {
+			acc.anthropicBlocks[payload.Index] = &anthropicBlockState{kind: "text"}
+		} else if payload.ContentBlock.Type == "tool_use" {
+			acc.anthropicBlocks[payload.Index] = &anthropicBlockState{
+				kind:     "tool",
+				toolID:   payload.ContentBlock.ID,
+				toolName: payload.ContentBlock.Name,
+			}
+		}
+		return nil, false, nil
+	case "content_block_delta":
+		var payload struct {
+			Index int `json:"index"`
+			Delta struct {
+				Type        string `json:"type"`
+				Text        string `json:"text,omitempty"`
+				PartialJSON string `json:"partial_json,omitempty"`
+			} `json:"delta"`
+		}
+		if err := json.Unmarshal(event.Data, &payload); err != nil {
+			return nil, false, err
+		}
+		block := acc.anthropicBlocks[payload.Index]
+		if block == nil {
+			return nil, false, nil
+		}
+		chunk := &StreamChunk{}
+		if block.kind == "text" && payload.Delta.Text != "" {
+			chunk.TextDelta = payload.Delta.Text
+		}
+		if block.kind == "tool" && (payload.Delta.PartialJSON != "" || payload.Delta.Text != "") {
+			argDelta := payload.Delta.PartialJSON
+			if argDelta == "" {
+				argDelta = payload.Delta.Text
+			}
+			chunk.ToolCallDeltas = append(chunk.ToolCallDeltas, ToolCallDelta{
+				ID:             block.toolID,
+				Type:           "function",
+				Function:       block.toolName,
+				ArgumentsDelta: argDelta,
+			})
+		}
+		if chunk.TextDelta == "" && len(chunk.ToolCallDeltas) == 0 {
+			return nil, false, nil
+		}
+		return chunk, false, nil
+	case "content_block_stop":
+		var payload struct {
+			Index int `json:"index"`
+		}
+		if err := json.Unmarshal(event.Data, &payload); err != nil {
+			return nil, false, err
+		}
+		block := acc.anthropicBlocks[payload.Index]
+		if block == nil {
+			return nil, false, nil
+		}
+		if block.kind == "tool" {
+			return &StreamChunk{
+				ToolCallDeltas: []ToolCallDelta{
+					{
+						ID:   block.toolID,
+						Type: "function",
+						// ArgumentsDelta empty; Done marks completion.
+						Function: block.toolName,
+						Done:     true,
+					},
+				},
+			}, false, nil
+		}
+		return nil, false, nil
+	case "message_delta":
+		var payload struct {
+			Delta struct {
+				StopReason string `json:"stop_reason"`
+			} `json:"delta"`
+		}
+		if err := json.Unmarshal(event.Data, &payload); err != nil {
+			return nil, false, err
+		}
+		if payload.Delta.StopReason != "" {
+			return &StreamChunk{Done: true}, true, nil
+		}
+		return nil, false, nil
+	default:
+		// Ignore other event types
+		return nil, false, nil
+	}
+}
+
+func (a *anthropicAdapter) getStreamEndpoint(model string) string {
+	return a.getEndpoint(model)
+}
+
 // --- Private Anthropic Specific Types ---
 
 type anthropicTool struct {
@@ -230,6 +358,7 @@ type anthropicMessagesRequest struct {
 	Messages  []anthropicMessage `json:"messages"`
 	MaxTokens int                `json:"max_tokens"`
 	Tools     []anthropicTool    `json:"tools,omitempty"`
+	Stream    bool               `json:"stream,omitempty"`
 }
 
 type anthropicMessage struct {
