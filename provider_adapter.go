@@ -11,8 +11,8 @@ import (
 // allowing the core client to remain generic.
 type providerAdapter interface {
 	// buildRequestPayload converts the universal Request into the provider-specific
-	// request body struct.
-	buildRequestPayload(req *Request) (any, error)
+	// request body struct. The context is used for operations like downloading media.
+	buildRequestPayload(ctx context.Context, req *Request) (any, error)
 
 	// parseResponse converts the provider-specific JSON response body
 	// into the universal Response.
@@ -52,7 +52,7 @@ func (c *genericClient) Generate(ctx context.Context, req *Request) (*Response, 
 	}
 
 	// 1. Build the provider-specific request payload using the adapter.
-	payload, err := c.adapter.buildRequestPayload(req)
+	payload, err := c.adapter.buildRequestPayload(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build request payload: %w", err)
 	}
@@ -83,7 +83,7 @@ func (c *genericClient) Stream(ctx context.Context, req *Request) (StreamReader,
 	}
 
 	// Build provider payload
-	payload, err := c.adapter.buildRequestPayload(req)
+	payload, err := c.adapter.buildRequestPayload(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build request payload: %w", err)
 	}

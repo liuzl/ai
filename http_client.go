@@ -33,8 +33,19 @@ func newBaseClient(provider, baseURL, apiVersion string, timeout time.Duration, 
 	}
 	headers.Set("Content-Type", "application/json")
 
+	// Configure transport with proper connection pooling for better performance
+	transport := &http.Transport{
+		MaxIdleConns:        100,              // Total idle connections across all hosts
+		MaxIdleConnsPerHost: 10,               // Idle connections per host (default is 2, which is too low)
+		IdleConnTimeout:     90 * time.Second, // How long idle connections stay alive
+		DisableCompression:  true,             // AI API responses are often already compressed or not compressible
+	}
+
 	return &baseClient{
-		httpClient: &http.Client{Timeout: timeout},
+		httpClient: &http.Client{
+			Timeout:   timeout,
+			Transport: transport,
+		},
 		baseURL:    baseURL,
 		apiVersion: apiVersion,
 		headers:    headers,
@@ -128,7 +139,8 @@ func (c *baseClient) doRequestRaw(ctx context.Context, method, path string, reqB
 	}
 	defer httpResp.Body.Close()
 
-	respBodyBytes, err := io.ReadAll(httpResp.Body)
+	// Read response with size limit to prevent memory exhaustion from malicious servers
+	respBodyBytes, err := io.ReadAll(io.LimitReader(httpResp.Body, maxResponseSize))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -241,7 +253,7 @@ func (c *baseClient) doStream(ctx context.Context, method, path string, reqBody 
 	}
 
 	if httpResp.StatusCode >= 400 {
-		respBodyBytes, _ := io.ReadAll(httpResp.Body)
+		respBodyBytes, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxResponseSize))
 		httpResp.Body.Close()
 
 		// Try to parse structured API error

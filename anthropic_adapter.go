@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -21,7 +22,7 @@ func (a *anthropicAdapter) getEndpoint(model string) string {
 	return "/messages"
 }
 
-func (a *anthropicAdapter) buildRequestPayload(req *Request) (any, error) {
+func (a *anthropicAdapter) buildRequestPayload(ctx context.Context, req *Request) (any, error) {
 	anthropicReq := &anthropicMessagesRequest{
 		Model:     a.getModel(req),
 		System:    req.SystemPrompt,

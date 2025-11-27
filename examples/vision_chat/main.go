@@ -133,7 +133,8 @@ func downloadImageAsBase64(url string) (string, error) {
 		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	imageBytes, err := io.ReadAll(resp.Body)
+	// Limit read to 100MB to prevent memory exhaustion
+	imageBytes, err := io.ReadAll(io.LimitReader(resp.Body, 100*1024*1024))
 	if err != nil {
 		return "", fmt.Errorf("failed to read image: %w", err)
 	}

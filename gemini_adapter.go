@@ -28,7 +28,7 @@ func (a *geminiAdapter) getStreamEndpoint(model string) string {
 	return fmt.Sprintf("/models/%s:streamGenerateContent", model)
 }
 
-func (a *geminiAdapter) buildRequestPayload(req *Request) (any, error) {
+func (a *geminiAdapter) buildRequestPayload(ctx context.Context, req *Request) (any, error) {
 	geminiReq := &geminiGenerateContentRequest{
 		Contents: make([]geminiContent, len(req.Messages)),
 	}
@@ -64,10 +64,12 @@ func (a *geminiAdapter) buildRequestPayload(req *Request) (any, error) {
 								}
 							case ImageSourceTypeURL:
 								// Gemini doesn't support URLs directly, so download and convert to base64
-								// Use a background context with timeout for image download
-								ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-								defer cancel()
-								data, format, err = downloadImageToBase64(ctx, part.ImageSource.URL, 30*time.Second)
+								// Use immediate invocation to ensure context cancellation happens per iteration
+								func() {
+									downloadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+									defer cancel()
+									data, format, err = downloadImageToBase64(downloadCtx, part.ImageSource.URL)
+								}()
 								if err != nil {
 									return nil, fmt.Errorf("failed to download image from URL for Gemini: %w", err)
 								}
@@ -93,6 +95,7 @@ func (a *geminiAdapter) buildRequestPayload(req *Request) (any, error) {
 					case ContentTypeAudio:
 						if part.AudioSource != nil {
 							var data string
+							var err error
 							format := part.AudioSource.Format
 
 							switch part.AudioSource.Type {
@@ -100,9 +103,15 @@ func (a *geminiAdapter) buildRequestPayload(req *Request) (any, error) {
 								data = part.AudioSource.Data
 							case MediaSourceTypeURL:
 								// Download audio from URL
-								ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-								defer cancel()
-								downloaded, err := downloadMediaToBase64(ctx, part.AudioSource.URL)
+								// Use immediate invocation to ensure context cancellation happens per iteration
+								var downloaded string
+								func() {
+									downloadCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+									defer cancel()
+									var dlErr error
+									downloaded, dlErr = downloadMediaToBase64(downloadCtx, part.AudioSource.URL)
+									err = dlErr
+								}()
 								if err != nil {
 									return nil, fmt.Errorf("failed to download audio from URL for Gemini: %w", err)
 								}
@@ -126,6 +135,7 @@ func (a *geminiAdapter) buildRequestPayload(req *Request) (any, error) {
 					case ContentTypeVideo:
 						if part.VideoSource != nil {
 							var data string
+							var err error
 							format := part.VideoSource.Format
 
 							switch part.VideoSource.Type {
@@ -133,9 +143,15 @@ func (a *geminiAdapter) buildRequestPayload(req *Request) (any, error) {
 								data = part.VideoSource.Data
 							case MediaSourceTypeURL:
 								// Download video from URL
-								ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-								defer cancel()
-								downloaded, err := downloadMediaToBase64(ctx, part.VideoSource.URL)
+								// Use immediate invocation to ensure context cancellation happens per iteration
+								var downloaded string
+								func() {
+									downloadCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+									defer cancel()
+									var dlErr error
+									downloaded, dlErr = downloadMediaToBase64(downloadCtx, part.VideoSource.URL)
+									err = dlErr
+								}()
 								if err != nil {
 									return nil, fmt.Errorf("failed to download video from URL for Gemini: %w", err)
 								}
@@ -159,6 +175,7 @@ func (a *geminiAdapter) buildRequestPayload(req *Request) (any, error) {
 					case ContentTypeDocument:
 						if part.DocumentSource != nil {
 							var data string
+							var err error
 							mimeType := part.DocumentSource.MimeType
 
 							switch part.DocumentSource.Type {
@@ -166,9 +183,15 @@ func (a *geminiAdapter) buildRequestPayload(req *Request) (any, error) {
 								data = part.DocumentSource.Data
 							case MediaSourceTypeURL:
 								// Download document from URL
-								ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-								defer cancel()
-								downloaded, err := downloadMediaToBase64(ctx, part.DocumentSource.URL)
+								// Use immediate invocation to ensure context cancellation happens per iteration
+								var downloaded string
+								func() {
+									downloadCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+									defer cancel()
+									var dlErr error
+									downloaded, dlErr = downloadMediaToBase64(downloadCtx, part.DocumentSource.URL)
+									err = dlErr
+								}()
 								if err != nil {
 									return nil, fmt.Errorf("failed to download document from URL for Gemini: %w", err)
 								}

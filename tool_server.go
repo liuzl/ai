@@ -55,9 +55,10 @@ func (m *ToolServerManager) LoadFromFile(configFile string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create client for '%s': %w", name, err)
 		}
+		// Only lock for the critical section (map write)
 		m.mu.Lock()
-		defer m.mu.Unlock()
 		m.clients[name] = client
+		m.mu.Unlock()
 	}
 	return nil
 }

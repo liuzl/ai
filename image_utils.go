@@ -7,16 +7,21 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
+)
+
+const (
+	// Maximum size limits for downloaded media to prevent memory exhaustion
+	maxImageSize    = 100 * 1024 * 1024 // 100 MB
+	maxMediaSize    = 500 * 1024 * 1024 // 500 MB for video/audio
+	maxResponseSize = 10 * 1024 * 1024  // 10 MB for API responses
 )
 
 // downloadImageToBase64 downloads an image from a URL and converts it to base64.
 // This is used for providers like Gemini that don't support image URLs directly.
-func downloadImageToBase64(ctx context.Context, imageURL string, timeout time.Duration) (string, string, error) {
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: timeout,
-	}
+// The context should already have a timeout if needed.
+func downloadImageToBase64(ctx context.Context, imageURL string) (string, string, error) {
+	// Create HTTP client - timeout is controlled by the context
+	client := &http.Client{}
 
 	// Create request with context
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
@@ -40,8 +45,8 @@ func downloadImageToBase64(ctx context.Context, imageURL string, timeout time.Du
 		return "", "", fmt.Errorf("failed to download image: HTTP %d", resp.StatusCode)
 	}
 
-	// Read image data
-	imageData, err := io.ReadAll(resp.Body)
+	// Read image data with size limit to prevent memory exhaustion
+	imageData, err := io.ReadAll(io.LimitReader(resp.Body, maxImageSize))
 	if err != nil {
 		return "", "", fmt.Errorf("failed to read image data: %w", err)
 	}
@@ -121,8 +126,8 @@ func downloadMediaToBase64(ctx context.Context, mediaURL string) (string, error)
 		return "", fmt.Errorf("failed to download media: HTTP %d", resp.StatusCode)
 	}
 
-	// Read media data
-	mediaData, err := io.ReadAll(resp.Body)
+	// Read media data with size limit to prevent memory exhaustion
+	mediaData, err := io.ReadAll(io.LimitReader(resp.Body, maxMediaSize))
 	if err != nil {
 		return "", fmt.Errorf("failed to read media data: %w", err)
 	}

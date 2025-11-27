@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -20,7 +21,7 @@ func (a *openaiAdapter) getEndpoint(model string) string {
 	return "/chat/completions"
 }
 
-func (a *openaiAdapter) buildRequestPayload(req *Request) (any, error) {
+func (a *openaiAdapter) buildRequestPayload(ctx context.Context, req *Request) (any, error) {
 	openaiReq := &OpenAIChatCompletionRequest{
 		Model:    a.getModel(req),
 		Messages: make([]openaiMessage, len(req.Messages)),

@@ -33,9 +33,10 @@ func TestDownloadImageToBase64(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Test successful download
-	ctx := context.Background()
-	base64Data, format, err := downloadImageToBase64(ctx, server.URL, 5*time.Second)
+	// Test successful download with timeout in context
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	base64Data, format, err := downloadImageToBase64(ctx, server.URL)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -58,8 +59,9 @@ func TestDownloadImageToBase64_JPEG(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ctx := context.Background()
-	_, format, err := downloadImageToBase64(ctx, server.URL, 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, format, err := downloadImageToBase64(ctx, server.URL)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -76,8 +78,9 @@ func TestDownloadImageToBase64_404(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ctx := context.Background()
-	_, _, err := downloadImageToBase64(ctx, server.URL, 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _, err := downloadImageToBase64(ctx, server.URL)
 	if err == nil {
 		t.Fatal("Expected error for 404 response, got nil")
 	}
@@ -95,9 +98,10 @@ func TestDownloadImageToBase64_Timeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Use very short timeout
-	ctx := context.Background()
-	_, _, err := downloadImageToBase64(ctx, server.URL, 100*time.Millisecond)
+	// Use very short timeout in context
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, _, err := downloadImageToBase64(ctx, server.URL)
 	if err == nil {
 		t.Fatal("Expected timeout error, got nil")
 	}
@@ -115,7 +119,7 @@ func TestDownloadImageToBase64_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	_, _, err := downloadImageToBase64(ctx, server.URL, 5*time.Second)
+	_, _, err := downloadImageToBase64(ctx, server.URL)
 	if err == nil {
 		t.Fatal("Expected context cancellation error, got nil")
 	}
