@@ -184,9 +184,23 @@ func (a *openaiAdapter) parseStreamEvent(event *sseEvent, acc *streamAccumulator
 	choice := chunkResp.Choices[0]
 	chunk := &StreamChunk{}
 
-	for _, part := range choice.Delta.Content {
-		if part.Type == "text" {
-			chunk.TextDelta += part.Text
+	// Handle content which can be array of parts or raw string
+	if len(choice.Delta.Content) > 0 {
+		var parts []openaiContentPart
+		if err := json.Unmarshal(choice.Delta.Content, &parts); err == nil {
+			for _, part := range parts {
+				if part.Type == "text" {
+					chunk.TextDelta += part.Text
+				}
+			}
+		} else {
+			// Try as plain string
+			var s string
+			if errStr := json.Unmarshal(choice.Delta.Content, &s); errStr == nil {
+				chunk.TextDelta += s
+			} else {
+				// Ignore unrecognized content
+			}
 		}
 	}
 
@@ -296,7 +310,7 @@ type openaiStreamChoice struct {
 }
 
 type openaiStreamDelta struct {
-	Content   []openaiContentPart   `json:"content"`
+	Content   json.RawMessage       `json:"content"`
 	ToolCalls []openaiToolCallDelta `json:"tool_calls"`
 }
 
