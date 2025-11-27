@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 )
 
@@ -16,6 +17,31 @@ type OpenAIFormatConverter struct{}
 // NewOpenAIFormatConverter creates a new OpenAI format converter.
 func NewOpenAIFormatConverter() *OpenAIFormatConverter {
 	return &OpenAIFormatConverter{}
+}
+
+// DecodeRequest decodes the request body into the OpenAI request struct.
+func (c *OpenAIFormatConverter) DecodeRequest(r *http.Request) (any, error) {
+	var req OpenAIChatCompletionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return nil, fmt.Errorf("failed to decode OpenAI request: %w", err)
+	}
+	return &req, nil
+}
+
+// IsStreaming checks if the decoded request indicates a streaming response.
+func (c *OpenAIFormatConverter) IsStreaming(providerReq any) bool {
+	if req, ok := providerReq.(*OpenAIChatCompletionRequest); ok {
+		return req.Stream
+	}
+	return false
+}
+
+// NewStreamHandler creates a handler for formatting streaming events.
+func (c *OpenAIFormatConverter) NewStreamHandler(id string, model string) StreamEventHandler {
+	return &OpenAIStreamHandler{
+		ID:    id,
+		Model: model,
+	}
 }
 
 // GetEndpoint returns the OpenAI API endpoint path.
@@ -198,6 +224,119 @@ func (c *OpenAIFormatConverter) ConvertResponseToOpenAI(universalResp *Response,
 	}
 
 	return openaiResp, nil
+}
+
+// --- OpenAI Stream Handler ---
+
+type OpenAIStreamHandler struct {
+	ID    string
+	Model string
+}
+
+func (h *OpenAIStreamHandler) OnStart(w http.ResponseWriter, flusher http.Flusher) {}
+
+func (h *OpenAIStreamHandler) OnChunk(w http.ResponseWriter, flusher http.Flusher, chunk *StreamChunk) error {
+	payload := buildOpenAIStreamChunk(h.ID, h.Model, chunk)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	flusher.Flush()
+	if chunk.Done {
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}
+	return nil
+}
+
+func (h *OpenAIStreamHandler) OnEnd(w http.ResponseWriter, flusher http.Flusher) {
+	fmt.Fprintf(w, "data: [DONE]\n\n")
+	flusher.Flush()
+}
+
+func (h *OpenAIStreamHandler) OnError(w http.ResponseWriter, flusher http.Flusher, err error) {
+	errPayload := map[string]string{"error": err.Error()}
+	if b, marshalErr := json.Marshal(errPayload); marshalErr == nil {
+		fmt.Fprintf(w, "data: %s\n\n", b)
+	}
+	flusher.Flush()
+}
+
+func buildOpenAIStreamChunk(id, model string, chunk *StreamChunk) *openAIStreamChunk {
+	choice := openAIStreamChoice{
+		Index: 0,
+		Delta: openAIStreamDelta{},
+	}
+	if chunk.TextDelta != "" {
+		choice.Delta.Content = append(choice.Delta.Content, openAIContentPart{
+			Type: "text",
+			Text: chunk.TextDelta,
+		})
+	}
+	for _, tc := range chunk.ToolCallDeltas {
+		choice.Delta.ToolCalls = append(choice.Delta.ToolCalls, openAIToolCallDelta{
+			ID:   tc.ID,
+			Type: tc.Type,
+			Function: openAIFunctionCallDelta{
+				Name:      tc.Function,
+				Arguments: tc.ArgumentsDelta,
+			},
+		})
+	}
+
+	if chunk.Done {
+		if len(choice.Delta.ToolCalls) > 0 {
+			choice.FinishReason = "tool_calls"
+		} else {
+			choice.FinishReason = "stop"
+		}
+	}
+
+	return &openAIStreamChunk{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: time.Now().Unix(),
+		Model:   model,
+		Choices: []openAIStreamChoice{choice},
+	}
+}
+
+// Minimal OpenAI streaming chunk structs
+type openAIStreamChunk struct {
+	ID      string               `json:"id"`
+	Object  string               `json:"object"`
+	Created int64                `json:"created"`
+	Model   string               `json:"model"`
+	Choices []openAIStreamChoice `json:"choices"`
+}
+
+type openAIStreamChoice struct {
+	Index        int               `json:"index"`
+	Delta        openAIStreamDelta `json:"delta"`
+	FinishReason string            `json:"finish_reason,omitempty"`
+}
+
+type openAIStreamDelta struct {
+	Role      string                `json:"role,omitempty"`
+	Content   []openAIContentPart   `json:"content,omitempty"`
+	ToolCalls []openAIToolCallDelta `json:"tool_calls,omitempty"`
+}
+
+type openAIContentPart struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+type openAIToolCallDelta struct {
+	ID       string                  `json:"id,omitempty"`
+	Type     string                  `json:"type,omitempty"`
+	Function openAIFunctionCallDelta `json:"function"`
+}
+
+type openAIFunctionCallDelta struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 }
 
 // Helper functions

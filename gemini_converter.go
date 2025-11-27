@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 )
 
@@ -15,6 +16,34 @@ type GeminiFormatConverter struct{}
 // NewGeminiFormatConverter creates a new Gemini format converter.
 func NewGeminiFormatConverter() *GeminiFormatConverter {
 	return &GeminiFormatConverter{}
+}
+
+// DecodeRequest decodes the request body into the Gemini request struct.
+func (c *GeminiFormatConverter) DecodeRequest(r *http.Request) (any, error) {
+	var req GeminiGenerateContentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return nil, fmt.Errorf("failed to decode Gemini request: %w", err)
+	}
+
+	// Check for URL-based streaming indication
+	if strings.Contains(r.URL.Path, ":streamGenerateContent") {
+		req.Stream = true
+	}
+
+	return &req, nil
+}
+
+// IsStreaming checks if the decoded request indicates a streaming response.
+func (c *GeminiFormatConverter) IsStreaming(providerReq any) bool {
+	if req, ok := providerReq.(*GeminiGenerateContentRequest); ok {
+		return req.Stream
+	}
+	return false
+}
+
+// NewStreamHandler creates a handler for formatting streaming events.
+func (c *GeminiFormatConverter) NewStreamHandler(id string, model string) StreamEventHandler {
+	return &GeminiStreamHandler{}
 }
 
 // GetEndpoint returns the Gemini API endpoint path (note: model is typically part of the path).
@@ -216,6 +245,72 @@ func (c *GeminiFormatConverter) ConvertResponseToGemini(universalResp *Response)
 	return geminiResp, nil
 }
 
+// --- Gemini Stream Handler ---
+
+type GeminiStreamHandler struct{}
+
+func (h *GeminiStreamHandler) OnStart(w http.ResponseWriter, flusher http.Flusher) {}
+
+func (h *GeminiStreamHandler) OnChunk(w http.ResponseWriter, flusher http.Flusher, chunk *StreamChunk) error {
+	payload := buildGeminiStreamChunk(chunk)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	flusher.Flush()
+	if chunk.Done {
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}
+	return nil
+}
+
+func (h *GeminiStreamHandler) OnEnd(w http.ResponseWriter, flusher http.Flusher) {
+	fmt.Fprintf(w, "data: [DONE]\n\n")
+	flusher.Flush()
+}
+
+func (h *GeminiStreamHandler) OnError(w http.ResponseWriter, flusher http.Flusher, err error) {
+	errPayload := map[string]string{"error": err.Error()}
+	if b, marshalErr := json.Marshal(errPayload); marshalErr == nil {
+		fmt.Fprintf(w, "data: %s\n\n", b)
+	}
+	flusher.Flush()
+}
+
+func buildGeminiStreamChunk(chunk *StreamChunk) any {
+	candidate := geminiStreamChunk{
+		Candidates: []geminiStreamCandidate{
+			{
+				Content: geminiStreamContent{},
+			},
+		},
+	}
+	if chunk.TextDelta != "" {
+		txt := chunk.TextDelta
+		candidate.Candidates[0].Content.Parts = append(candidate.Candidates[0].Content.Parts, geminiStreamPart{
+			Text: &txt,
+		})
+	}
+	for _, tc := range chunk.ToolCallDeltas {
+		var args map[string]any
+		if err := json.Unmarshal([]byte(tc.ArgumentsDelta), &args); err != nil {
+			args = map[string]any{"raw": tc.ArgumentsDelta}
+		}
+		candidate.Candidates[0].Content.Parts = append(candidate.Candidates[0].Content.Parts, geminiStreamPart{
+			FunctionCall: &geminiStreamFunctionCall{
+				Name: tc.Function,
+				Args: args,
+			},
+		})
+	}
+	if chunk.Done {
+		candidate.Candidates[0].FinishReason = "STOP"
+	}
+	return candidate
+}
+
 // --- Gemini Specific Types (Exported for format conversion) ---
 
 // GeminiGenerateContentRequest represents a Gemini generateContent request.
@@ -229,4 +324,31 @@ type GeminiGenerateContentRequest struct {
 // GeminiGenerateContentResponse represents a Gemini generateContent response.
 type GeminiGenerateContentResponse struct {
 	Candidates []geminiCandidate `json:"candidates"`
+}
+
+// Local Gemini streaming payload types (compatible with provider schema).
+type geminiStreamChunk struct {
+	Candidates []geminiStreamCandidate `json:"candidates"`
+	Done       bool                    `json:"done,omitempty"`
+}
+
+type geminiStreamCandidate struct {
+	Content       geminiStreamContent `json:"content"`
+	FinishReason  string              `json:"finishReason,omitempty"`
+	SafetyRatings any                 `json:"safetyRatings,omitempty"`
+}
+
+type geminiStreamContent struct {
+	Parts []geminiStreamPart `json:"parts"`
+	Role  string             `json:"role,omitempty"`
+}
+
+type geminiStreamPart struct {
+	Text         *string                   `json:"text,omitempty"`
+	FunctionCall *geminiStreamFunctionCall `json:"functionCall,omitempty"`
+}
+
+type geminiStreamFunctionCall struct {
+	Name string         `json:"name"`
+	Args map[string]any `json:"args"`
 }

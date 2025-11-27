@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -10,16 +11,19 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/liuzl/ai"
 )
 
+var streamCounter uint64
+
 // Config holds the proxy server configuration.
 type Config struct {
 	ListenAddr     string
-	APIFormat      ai.Provider // The API format to accept (openai, gemini, anthropic)
-	TargetProvider ai.Provider // The provider to call (openai, gemini, anthropic)
+	APIFormat      ai.Provider
+	TargetProvider ai.Provider
 	TargetAPIKey   string
 	TargetBaseURL  string
 	TargetModel    string
@@ -37,7 +41,6 @@ type ProxyServer struct {
 
 // NewProxyServer creates a new universal API proxy server.
 func NewProxyServer(config *Config) (*ProxyServer, error) {
-	// Create AI client for the target provider
 	opts := []ai.Option{
 		ai.WithProvider(config.TargetProvider),
 		ai.WithAPIKey(config.TargetAPIKey),
@@ -55,10 +58,7 @@ func NewProxyServer(config *Config) (*ProxyServer, error) {
 		return nil, fmt.Errorf("failed to create AI client: %w", err)
 	}
 
-	// Create format converter factory
 	factory := ai.NewFormatConverterFactory()
-
-	// Get the converter for the API format
 	converter, err := factory.GetConverter(config.APIFormat)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create format converter: %w", err)
@@ -72,69 +72,43 @@ func NewProxyServer(config *Config) (*ProxyServer, error) {
 	}, nil
 }
 
-// handleRequest is a generic handler that works for any provider format.
+// handleRequest handles incoming requests.
 func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request) {
-	// Only accept POST requests
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Read request body
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
-		return
+	// If verbose logging is enabled, use a TeeReader to capture the body
+	// Note: We need to wrap r.Body, and since DecodeRequest takes *http.Request,
+	// we need to temporarily replace r.Body if we want to tee it.
+	if s.config.VerboseLogging {
+		var buf bytes.Buffer
+		tee := io.TeeReader(r.Body, &buf)
+		// We can't easily replace r.Body with a TeeReader because we need it to be a ReadCloser
+		// So we use NopCloser.
+		r.Body = io.NopCloser(tee)
+		defer func() {
+			log.Printf("Received request: %s", buf.String())
+		}()
 	}
 	defer r.Body.Close()
 
-	if s.config.VerboseLogging {
-		log.Printf("Received request: %s", string(body))
-	}
-
-	// Parse request based on API format
-	var providerReq any
-	switch s.config.APIFormat {
-	case ai.ProviderOpenAI:
-		var req ai.OpenAIChatCompletionRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to parse OpenAI request: %v", err), http.StatusBadRequest)
-			return
-		}
-		// If stream requested, handle SSE streaming directly.
-		if req.Stream {
-			s.handleOpenAIStream(w, r, &req)
-			return
-		}
-		providerReq = &req
-	case ai.ProviderGemini:
-		var req ai.GeminiGenerateContentRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to parse Gemini request: %v", err), http.StatusBadRequest)
-			return
-		}
-		if strings.Contains(r.URL.Path, ":streamGenerateContent") || req.Stream {
-			s.handleGeminiStream(w, r, &req)
-			return
-		}
-		providerReq = &req
-	case ai.ProviderAnthropic:
-		var req ai.AnthropicMessagesRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to parse Anthropic request: %v", err), http.StatusBadRequest)
-			return
-		}
-		if req.Stream {
-			s.handleAnthropicStream(w, r, &req)
-			return
-		}
-		providerReq = &req
-	default:
-		http.Error(w, "Unsupported API format", http.StatusInternalServerError)
+	// Decode request using the converter
+	// Pass the full request so headers/URL can be inspected if needed
+	providerReq, err := s.formatConverter.DecodeRequest(r)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to decode request: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	// Convert to universal request
+	// Check for streaming
+	if s.formatConverter.IsStreaming(providerReq) {
+		s.handleStream(w, r, providerReq)
+		return
+	}
+
+	// Normal request handling
 	universalReq, err := s.formatConverter.ConvertRequestFromFormat(providerReq)
 	if err != nil {
 		log.Printf("Error converting request: %v", err)
@@ -142,12 +116,9 @@ func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Override model if configured
-	if s.config.TargetModel != "" && universalReq.Model == "" {
+	if s.config.TargetModel != "" {
 		universalReq.Model = s.config.TargetModel
 	}
-
-	// Preserve original model for response
 	originalModel := universalReq.Model
 
 	if s.config.VerboseLogging {
@@ -155,7 +126,6 @@ func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Universal request: %s", string(reqJSON))
 	}
 
-	// Call the target provider
 	ctx, cancel := context.WithTimeout(r.Context(), s.config.Timeout)
 	defer cancel()
 
@@ -171,7 +141,6 @@ func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Universal response: %s", string(respJSON))
 	}
 
-	// Convert response back to the API format
 	providerResp, err := s.formatConverter.ConvertResponseToFormat(universalResp, originalModel)
 	if err != nil {
 		log.Printf("Error converting response: %v", err)
@@ -179,30 +148,27 @@ func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(providerResp); err != nil {
 		log.Printf("Error encoding response: %v", err)
 	}
 }
 
-// handleOpenAIStream streams responses in OpenAI SSE format.
-func (s *ProxyServer) handleOpenAIStream(w http.ResponseWriter, r *http.Request, openaiReq *ai.OpenAIChatCompletionRequest) {
+// handleStream manages the streaming response lifecycle.
+func (s *ProxyServer) handleStream(w http.ResponseWriter, r *http.Request, providerReq any) {
 	streamingClient, ok := s.client.(ai.StreamingClient)
 	if !ok {
 		http.Error(w, "Streaming not supported by target provider", http.StatusNotImplemented)
 		return
 	}
 
-	// Convert to universal request
-	universalReq, err := s.formatConverter.ConvertRequestFromFormat(openaiReq)
+	universalReq, err := s.formatConverter.ConvertRequestFromFormat(providerReq)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to convert request: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	// Override model if configured
-	if s.config.TargetModel != "" && universalReq.Model == "" {
+	if s.config.TargetModel != "" {
 		universalReq.Model = s.config.TargetModel
 	}
 	originalModel := universalReq.Model
@@ -210,12 +176,12 @@ func (s *ProxyServer) handleOpenAIStream(w http.ResponseWriter, r *http.Request,
 	ctx, cancel := context.WithTimeout(r.Context(), s.config.Timeout)
 	defer cancel()
 
-	reader, err := streamingClient.Stream(ctx, universalReq)
+	stream, err := streamingClient.Stream(ctx, universalReq)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Provider stream error: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer reader.Close()
+	defer stream.Close()
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -227,441 +193,43 @@ func (s *ProxyServer) handleOpenAIStream(w http.ResponseWriter, r *http.Request,
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	streamID := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
+	streamID := fmt.Sprintf("chatcmpl-%d-%d", time.Now().Unix(), atomic.AddUint64(&streamCounter, 1))
+
+	// Get specific handler from converter
+	handler := s.formatConverter.NewStreamHandler(streamID, originalModel)
+
+	handler.OnStart(w, flusher)
 
 	for {
-		chunk, err := reader.Recv()
+		chunk, err := stream.Recv()
 		if err == io.EOF {
-			fmt.Fprintf(w, "data: [DONE]\n\n")
-			flusher.Flush()
+			handler.OnEnd(w, flusher)
 			return
 		}
 		if err != nil {
-			errPayload := map[string]string{"error": err.Error()}
-			if b, marshalErr := json.Marshal(errPayload); marshalErr == nil {
-				fmt.Fprintf(w, "data: %s\n\n", b)
-			}
-			flusher.Flush()
+			handler.OnError(w, flusher, err)
 			return
 		}
 
-		payload := buildOpenAIStreamChunk(streamID, originalModel, chunk)
-		data, err := json.Marshal(payload)
-		if err != nil {
-			errPayload := map[string]string{"error": err.Error()}
-			if b, marshalErr := json.Marshal(errPayload); marshalErr == nil {
-				fmt.Fprintf(w, "data: %s\n\n", b)
-			}
-			flusher.Flush()
-			return
-		}
-
-		fmt.Fprintf(w, "data: %s\n\n", data)
-		flusher.Flush()
-
-		if chunk.Done {
-			fmt.Fprintf(w, "data: [DONE]\n\n")
-			flusher.Flush()
+		if err := handler.OnChunk(w, flusher, chunk); err != nil {
+			log.Printf("Error formatting chunk: %v", err)
 			return
 		}
 	}
-}
-
-// buildOpenAIStreamChunk converts a universal StreamChunk to OpenAI SSE chunk.
-func buildOpenAIStreamChunk(id, model string, chunk *ai.StreamChunk) *openAIStreamChunk {
-	choice := openAIStreamChoice{
-		Index: 0,
-		Delta: openAIStreamDelta{},
-	}
-	if chunk.TextDelta != "" {
-		choice.Delta.Content = append(choice.Delta.Content, openAIContentPart{
-			Type: "text",
-			Text: chunk.TextDelta,
-		})
-	}
-	for _, tc := range chunk.ToolCallDeltas {
-		choice.Delta.ToolCalls = append(choice.Delta.ToolCalls, openAIToolCallDelta{
-			ID:   tc.ID,
-			Type: tc.Type,
-			Function: openAIFunctionCallDelta{
-				Name:      tc.Function,
-				Arguments: tc.ArgumentsDelta,
-			},
-		})
-	}
-
-	if chunk.Done {
-		if len(choice.Delta.ToolCalls) > 0 {
-			choice.FinishReason = "tool_calls"
-		} else {
-			choice.FinishReason = "stop"
-		}
-	}
-
-	return &openAIStreamChunk{
-		ID:      id,
-		Object:  "chat.completion.chunk",
-		Created: time.Now().Unix(),
-		Model:   model,
-		Choices: []openAIStreamChoice{choice},
-	}
-}
-
-// Minimal OpenAI streaming chunk structs for SSE responses.
-type openAIStreamChunk struct {
-	ID      string               `json:"id"`
-	Object  string               `json:"object"`
-	Created int64                `json:"created"`
-	Model   string               `json:"model"`
-	Choices []openAIStreamChoice `json:"choices"`
-}
-
-type openAIStreamChoice struct {
-	Index        int               `json:"index"`
-	Delta        openAIStreamDelta `json:"delta"`
-	FinishReason string            `json:"finish_reason,omitempty"`
-}
-
-type openAIStreamDelta struct {
-	Role      string                `json:"role,omitempty"`
-	Content   []openAIContentPart   `json:"content,omitempty"`
-	ToolCalls []openAIToolCallDelta `json:"tool_calls,omitempty"`
-}
-
-type openAIContentPart struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
-}
-
-type openAIToolCallDelta struct {
-	ID       string                  `json:"id,omitempty"`
-	Type     string                  `json:"type,omitempty"`
-	Function openAIFunctionCallDelta `json:"function"`
-}
-
-type openAIFunctionCallDelta struct {
-	Name      string `json:"name,omitempty"`
-	Arguments string `json:"arguments,omitempty"`
-}
-
-// handleAnthropicStream streams responses in Anthropic SSE format.
-func (s *ProxyServer) handleAnthropicStream(w http.ResponseWriter, r *http.Request, anthropicReq *ai.AnthropicMessagesRequest) {
-	streamingClient, ok := s.client.(ai.StreamingClient)
-	if !ok {
-		http.Error(w, "Streaming not supported by target provider", http.StatusNotImplemented)
-		return
-	}
-
-	universalReq, err := s.formatConverter.ConvertRequestFromFormat(anthropicReq)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to convert request: %v", err), http.StatusBadRequest)
-		return
-	}
-	if s.config.TargetModel != "" && universalReq.Model == "" {
-		universalReq.Model = s.config.TargetModel
-	}
-	originalModel := universalReq.Model
-
-	ctx, cancel := context.WithTimeout(r.Context(), s.config.Timeout)
-	defer cancel()
-
-	reader, err := streamingClient.Stream(ctx, universalReq)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Provider stream error: %v", err), http.StatusInternalServerError)
-		return
-	}
-	defer reader.Close()
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "Streaming not supported by server", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	state := &anthropicStreamState{
-		messageStarted: false,
-		nextIndex:      0,
-		toolIndex:      make(map[string]int),
-	}
-	messageID := fmt.Sprintf("msg_%d", time.Now().UnixNano())
-
-	for {
-		chunk, err := reader.Recv()
-		if err == io.EOF {
-			sendAnthropicEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
-			return
-		}
-		if err != nil {
-			sendAnthropicEvent(w, flusher, "error", map[string]string{"error": err.Error()})
-			return
-		}
-
-		emitAnthropicEvents(w, flusher, state, messageID, originalModel, chunk)
-
-		if chunk.Done {
-			sendAnthropicEvent(w, flusher, "message_delta", map[string]any{
-				"type":  "message_delta",
-				"delta": map[string]any{"stop_reason": "end_turn"},
-			})
-			sendAnthropicEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
-			return
-		}
-	}
-}
-
-type anthropicStreamState struct {
-	messageStarted bool
-	textIndex      *int
-	nextIndex      int
-	toolIndex      map[string]int
-}
-
-func emitAnthropicEvents(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, messageID, model string, chunk *ai.StreamChunk) {
-	if !state.messageStarted {
-		sendAnthropicEvent(w, flusher, "message_start", map[string]any{
-			"type": "message_start",
-			"message": map[string]any{
-				"id":    messageID,
-				"type":  "message",
-				"role":  "assistant",
-				"model": model,
-			},
-		})
-		state.messageStarted = true
-	}
-
-	// Text content
-	if chunk.TextDelta != "" {
-		index := 0
-		if state.textIndex == nil {
-			state.textIndex = new(int)
-			*state.textIndex = state.nextIndex
-			index = *state.textIndex
-			state.nextIndex++
-			sendAnthropicEvent(w, flusher, "content_block_start", map[string]any{
-				"type":  "content_block_start",
-				"index": index,
-				"content_block": map[string]any{
-					"type": "text",
-				},
-			})
-		} else {
-			index = *state.textIndex
-		}
-		sendAnthropicEvent(w, flusher, "content_block_delta", map[string]any{
-			"type":  "content_block_delta",
-			"index": index,
-			"delta": map[string]any{
-				"type": "text_delta",
-				"text": chunk.TextDelta,
-			},
-		})
-	}
-
-	// Tool calls
-	for _, tc := range chunk.ToolCallDeltas {
-		idx, ok := state.toolIndex[tc.ID]
-		if !ok {
-			idx = state.nextIndex
-			state.nextIndex++
-			state.toolIndex[tc.ID] = idx
-			sendAnthropicEvent(w, flusher, "content_block_start", map[string]any{
-				"type":  "content_block_start",
-				"index": idx,
-				"content_block": map[string]any{
-					"type": "tool_use",
-					"id":   tc.ID,
-					"name": tc.Function,
-				},
-			})
-		}
-
-		if tc.ArgumentsDelta != "" {
-			sendAnthropicEvent(w, flusher, "content_block_delta", map[string]any{
-				"type":  "content_block_delta",
-				"index": idx,
-				"delta": map[string]any{
-					"type":         "input_json_delta",
-					"partial_json": tc.ArgumentsDelta,
-				},
-			})
-		}
-
-		if tc.Done {
-			sendAnthropicEvent(w, flusher, "content_block_stop", map[string]any{
-				"type":  "content_block_stop",
-				"index": idx,
-			})
-		}
-	}
-}
-
-func sendAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, event string, payload any) {
-	w.Write([]byte("event: " + event + "\n"))
-	if b, err := json.Marshal(payload); err == nil {
-		fmt.Fprintf(w, "data: %s\n\n", b)
-	} else {
-		fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
-	}
-	flusher.Flush()
-}
-
-// handleGeminiStream streams responses in Gemini SSE format.
-func (s *ProxyServer) handleGeminiStream(w http.ResponseWriter, r *http.Request, geminiReq *ai.GeminiGenerateContentRequest) {
-	streamingClient, ok := s.client.(ai.StreamingClient)
-	if !ok {
-		http.Error(w, "Streaming not supported by target provider", http.StatusNotImplemented)
-		return
-	}
-
-	universalReq, err := s.formatConverter.ConvertRequestFromFormat(geminiReq)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to convert request: %v", err), http.StatusBadRequest)
-		return
-	}
-	if s.config.TargetModel != "" && universalReq.Model == "" {
-		universalReq.Model = s.config.TargetModel
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), s.config.Timeout)
-	defer cancel()
-
-	reader, err := streamingClient.Stream(ctx, universalReq)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Provider stream error: %v", err), http.StatusInternalServerError)
-		return
-	}
-	defer reader.Close()
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "Streaming not supported by server", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	for {
-		chunk, err := reader.Recv()
-		if err == io.EOF {
-			fmt.Fprintf(w, "data: [DONE]\n\n")
-			flusher.Flush()
-			return
-		}
-		if err != nil {
-			errPayload := map[string]string{"error": err.Error()}
-			if b, marshalErr := json.Marshal(errPayload); marshalErr == nil {
-				fmt.Fprintf(w, "data: %s\n\n", b)
-			}
-			flusher.Flush()
-			return
-		}
-
-		payload := buildGeminiStreamChunk(chunk)
-		data, err := json.Marshal(payload)
-		if err != nil {
-			errPayload := map[string]string{"error": err.Error()}
-			if b, marshalErr := json.Marshal(errPayload); marshalErr == nil {
-				fmt.Fprintf(w, "data: %s\n\n", b)
-			}
-			flusher.Flush()
-			return
-		}
-
-		fmt.Fprintf(w, "data: %s\n\n", data)
-		flusher.Flush()
-
-		if chunk.Done {
-			fmt.Fprintf(w, "data: [DONE]\n\n")
-			flusher.Flush()
-			return
-		}
-	}
-}
-
-// buildGeminiStreamChunk converts a universal StreamChunk to Gemini streaming payload.
-func buildGeminiStreamChunk(chunk *ai.StreamChunk) any {
-	candidate := geminiStreamChunk{
-		Candidates: []geminiStreamCandidate{
-			{
-				Content: geminiStreamContent{},
-			},
-		},
-	}
-	if chunk.TextDelta != "" {
-		txt := chunk.TextDelta
-		candidate.Candidates[0].Content.Parts = append(candidate.Candidates[0].Content.Parts, geminiStreamPart{
-			Text: &txt,
-		})
-	}
-	for _, tc := range chunk.ToolCallDeltas {
-		var args map[string]any
-		if err := json.Unmarshal([]byte(tc.ArgumentsDelta), &args); err != nil {
-			args = map[string]any{"raw": tc.ArgumentsDelta}
-		}
-		candidate.Candidates[0].Content.Parts = append(candidate.Candidates[0].Content.Parts, geminiStreamPart{
-			FunctionCall: &geminiStreamFunctionCall{
-				Name: tc.Function,
-				Args: args,
-			},
-		})
-	}
-	if chunk.Done {
-		candidate.Candidates[0].FinishReason = "STOP"
-	}
-	return candidate
-}
-
-// Local Gemini streaming payload types (compatible with provider schema).
-type geminiStreamChunk struct {
-	Candidates []geminiStreamCandidate `json:"candidates"`
-	Done       bool                    `json:"done,omitempty"`
-}
-
-type geminiStreamCandidate struct {
-	Content       geminiStreamContent `json:"content"`
-	FinishReason  string              `json:"finishReason,omitempty"`
-	SafetyRatings any                 `json:"safetyRatings,omitempty"`
-}
-
-type geminiStreamContent struct {
-	Parts []geminiStreamPart `json:"parts"`
-	Role  string             `json:"role,omitempty"`
-}
-
-type geminiStreamPart struct {
-	Text         *string                   `json:"text,omitempty"`
-	FunctionCall *geminiStreamFunctionCall `json:"functionCall,omitempty"`
-}
-
-type geminiStreamFunctionCall struct {
-	Name string         `json:"name"`
-	Args map[string]any `json:"args"`
 }
 
 // Start starts the HTTP server.
 func (s *ProxyServer) Start() error {
 	mux := http.NewServeMux()
-
-	// Register the endpoint based on API format
 	endpoint := s.formatConverter.GetEndpoint()
 
-	// For Gemini, we need to handle the dynamic model path
 	if s.config.APIFormat == ai.ProviderGemini {
-		// Match any model path
 		mux.HandleFunc("/v1beta/models/", s.handleRequest)
 		mux.HandleFunc("/v1/models/", s.handleRequest)
 	} else {
 		mux.HandleFunc(endpoint, s.handleRequest)
 	}
 
-	// Health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
@@ -670,15 +238,23 @@ func (s *ProxyServer) Start() error {
 	log.Printf("Starting API proxy server on %s", s.config.ListenAddr)
 	log.Printf("API Format: %s (endpoint: %s)", s.config.APIFormat, endpoint)
 	log.Printf("Target Provider: %s", s.config.TargetProvider)
-	if s.config.VerboseLogging {
-		log.Printf("Verbose logging enabled")
-	}
 
 	return http.ListenAndServe(s.config.ListenAddr, mux)
 }
 
 func main() {
-	// Parse command-line flags
+	config := loadConfig()
+	server, err := NewProxyServer(config)
+	if err != nil {
+		log.Fatalf("Failed to create proxy server: %v", err)
+	}
+
+	if err := server.Start(); err != nil {
+		log.Fatalf("Server error: %v", err)
+	}
+}
+
+func loadConfig() *Config {
 	listenAddr := flag.String("listen", ":8080", "Server listen address")
 	apiFormat := flag.String("format", "", "API format to accept (openai, gemini, anthropic)")
 	targetProvider := flag.String("provider", "", "Target AI provider to call (openai, gemini, anthropic)")
@@ -689,58 +265,45 @@ func main() {
 	verbose := flag.Bool("verbose", false, "Enable verbose logging")
 	flag.Parse()
 
-	// Validate and default API format
-	if *apiFormat == "" {
-		*apiFormat = strings.ToLower(os.Getenv("API_FORMAT"))
-		if *apiFormat == "" {
-			*apiFormat = "openai" // Default to OpenAI format
+	formatStr := strings.ToLower(*apiFormat)
+	if formatStr == "" {
+		formatStr = strings.ToLower(os.Getenv("API_FORMAT"))
+		if formatStr == "" {
+			formatStr = "openai"
 		}
 	}
-	*apiFormat = strings.ToLower(*apiFormat)
 
-	// Validate and default target provider
-	if *targetProvider == "" {
-		*targetProvider = strings.ToLower(os.Getenv("AI_PROVIDER"))
-		if *targetProvider == "" {
+	providerStr := strings.ToLower(*targetProvider)
+	if providerStr == "" {
+		providerStr = strings.ToLower(os.Getenv("AI_PROVIDER"))
+		if providerStr == "" {
 			log.Fatal("Error: -provider flag or AI_PROVIDER env var is required")
 		}
 	}
-	*targetProvider = strings.ToLower(*targetProvider)
 
-	// Get API key from environment if not provided
-	if *apiKey == "" {
-		switch ai.Provider(*targetProvider) {
+	key := *apiKey
+	if key == "" {
+		switch ai.Provider(providerStr) {
 		case ai.ProviderOpenAI:
-			*apiKey = os.Getenv("OPENAI_API_KEY")
+			key = os.Getenv("OPENAI_API_KEY")
 		case ai.ProviderGemini:
-			*apiKey = os.Getenv("GEMINI_API_KEY")
+			key = os.Getenv("GEMINI_API_KEY")
 		case ai.ProviderAnthropic:
-			*apiKey = os.Getenv("ANTHROPIC_API_KEY")
+			key = os.Getenv("ANTHROPIC_API_KEY")
 		}
-		if *apiKey == "" {
+		if key == "" {
 			log.Fatal("Error: -api-key flag or provider-specific API key env var is required")
 		}
 	}
 
-	// Create configuration
-	config := &Config{
+	return &Config{
 		ListenAddr:     *listenAddr,
-		APIFormat:      ai.Provider(*apiFormat),
-		TargetProvider: ai.Provider(*targetProvider),
-		TargetAPIKey:   *apiKey,
+		APIFormat:      ai.Provider(formatStr),
+		TargetProvider: ai.Provider(providerStr),
+		TargetAPIKey:   key,
 		TargetBaseURL:  *baseURL,
 		TargetModel:    *model,
 		Timeout:        *timeout,
 		VerboseLogging: *verbose,
-	}
-
-	// Create and start proxy server
-	server, err := NewProxyServer(config)
-	if err != nil {
-		log.Fatalf("Failed to create proxy server: %v", err)
-	}
-
-	if err := server.Start(); err != nil {
-		log.Fatalf("Server error: %v", err)
 	}
 }
