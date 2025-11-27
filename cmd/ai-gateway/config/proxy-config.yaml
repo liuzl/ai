@@ -1,0 +1,49 @@
+version: "1.0"
+
+# Model routing configuration
+# Each model is mapped to a specific backend provider
+models:
+  # OpenAI models
+  - name: "gpt-4"
+    provider: "openai"
+    description: "GPT-4 model"
+
+  - name: "gpt-4o"
+    provider: "openai"
+    description: "GPT-4 Omni"
+
+  - name: "gpt-4o-mini"
+    provider: "openai"
+    description: "GPT-4 Omni Mini"
+
+  # Anthropic models
+  - name: "claude-3-5-sonnet-20241022"
+    provider: "anthropic"
+    description: "Claude 3.5 Sonnet"
+
+  - name: "claude-3-5-haiku-20241022"
+    provider: "anthropic"
+    description: "Claude 3.5 Haiku"
+
+  - name: "claude-3-opus-20240229"
+    provider: "anthropic"
+    description: "Claude 3 Opus"
+
+  # Gemini models
+  - name: "gemini-2.0-flash-exp"
+    provider: "gemini"
+    description: "Gemini 2.0 Flash Experimental"
+
+  - name: "gemini-1.5-pro"
+    provider: "gemini"
+    description: "Gemini 1.5 Pro"
+
+  - name: "gemini-1.5-flash"
+    provider: "gemini"
+    description: "Gemini 1.5 Flash"
+
+# Optional: fallback provider for unknown models
+# default_provider: "openai"
+
+# Optional: custom timeout (default: 5m)
+# timeout: "5m"

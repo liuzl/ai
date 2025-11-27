@@ -34,6 +34,7 @@ go.work.sum
 
 # Compiled binaries (in root directory)
 cmd/api-proxy/api-proxy
+cmd/ai-gateway/ai-gateway
 /api-proxy
 /universal_proxy_demo
 /audio_chat
