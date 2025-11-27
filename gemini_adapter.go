@@ -336,7 +336,13 @@ func (a *geminiAdapter) parseStreamEvent(event *sseEvent, acc *streamAccumulator
 
 	var chunkResp geminiStreamResponse
 	if err := json.Unmarshal(event.Data, &chunkResp); err != nil {
-		return nil, false, fmt.Errorf("failed to unmarshal gemini stream event: %w", err)
+		// Some responses are wrapped in an array; try to decode that.
+		var arr []geminiStreamResponse
+		if errArr := json.Unmarshal(event.Data, &arr); errArr == nil && len(arr) > 0 {
+			chunkResp = arr[0]
+		} else {
+			return nil, false, fmt.Errorf("failed to unmarshal gemini stream event: %w", err)
+		}
 	}
 
 	if chunkResp.Done {
