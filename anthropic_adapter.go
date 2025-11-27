@@ -251,9 +251,10 @@ func (a *anthropicAdapter) parseStreamEvent(event *sseEvent, acc *streamAccumula
 		if err := json.Unmarshal(event.Data, &payload); err != nil {
 			return nil, false, err
 		}
-		if payload.ContentBlock.Type == "text" {
+		switch payload.ContentBlock.Type {
+		case "text":
 			acc.anthropicBlocks[payload.Index] = &anthropicBlockState{kind: "text"}
-		} else if payload.ContentBlock.Type == "tool_use" {
+		case "tool_use":
 			acc.anthropicBlocks[payload.Index] = &anthropicBlockState{
 				kind:     "tool",
 				toolID:   payload.ContentBlock.ID,
