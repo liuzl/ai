@@ -33,6 +33,7 @@ go.work.sum
 # .vscode/
 
 # Compiled binaries (in root directory)
+cmd/api-proxy/api-proxy
 /api-proxy
 /universal_proxy_demo
 /audio_chat
