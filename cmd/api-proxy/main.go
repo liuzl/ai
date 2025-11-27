@@ -113,11 +113,19 @@ func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("Failed to parse Gemini request: %v", err), http.StatusBadRequest)
 			return
 		}
+		if strings.Contains(r.URL.Path, ":streamGenerateContent") || req.Stream {
+			s.handleGeminiStream(w, r, &req)
+			return
+		}
 		providerReq = &req
 	case ai.ProviderAnthropic:
 		var req ai.AnthropicMessagesRequest
 		if err := json.Unmarshal(body, &req); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to parse Anthropic request: %v", err), http.StatusBadRequest)
+			return
+		}
+		if req.Stream {
+			s.handleAnthropicStream(w, r, &req)
 			return
 		}
 		providerReq = &req
@@ -334,6 +342,307 @@ type openAIToolCallDelta struct {
 type openAIFunctionCallDelta struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
+}
+
+// handleAnthropicStream streams responses in Anthropic SSE format.
+func (s *ProxyServer) handleAnthropicStream(w http.ResponseWriter, r *http.Request, anthropicReq *ai.AnthropicMessagesRequest) {
+	streamingClient, ok := s.client.(ai.StreamingClient)
+	if !ok {
+		http.Error(w, "Streaming not supported by target provider", http.StatusNotImplemented)
+		return
+	}
+
+	universalReq, err := s.formatConverter.ConvertRequestFromFormat(anthropicReq)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to convert request: %v", err), http.StatusBadRequest)
+		return
+	}
+	if s.config.TargetModel != "" && universalReq.Model == "" {
+		universalReq.Model = s.config.TargetModel
+	}
+	originalModel := universalReq.Model
+
+	ctx, cancel := context.WithTimeout(r.Context(), s.config.Timeout)
+	defer cancel()
+
+	reader, err := streamingClient.Stream(ctx, universalReq)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Provider stream error: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer reader.Close()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported by server", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	state := &anthropicStreamState{
+		messageStarted: false,
+		nextIndex:      0,
+		toolIndex:      make(map[string]int),
+	}
+	messageID := fmt.Sprintf("msg_%d", time.Now().UnixNano())
+
+	for {
+		chunk, err := reader.Recv()
+		if err == io.EOF {
+			sendAnthropicEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
+			return
+		}
+		if err != nil {
+			sendAnthropicEvent(w, flusher, "error", map[string]string{"error": err.Error()})
+			return
+		}
+
+		emitAnthropicEvents(w, flusher, state, messageID, originalModel, chunk)
+
+		if chunk.Done {
+			sendAnthropicEvent(w, flusher, "message_delta", map[string]any{
+				"type":  "message_delta",
+				"delta": map[string]any{"stop_reason": "end_turn"},
+			})
+			sendAnthropicEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
+			return
+		}
+	}
+}
+
+type anthropicStreamState struct {
+	messageStarted bool
+	textIndex      *int
+	nextIndex      int
+	toolIndex      map[string]int
+}
+
+func emitAnthropicEvents(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, messageID, model string, chunk *ai.StreamChunk) {
+	if !state.messageStarted {
+		sendAnthropicEvent(w, flusher, "message_start", map[string]any{
+			"type": "message_start",
+			"message": map[string]any{
+				"id":    messageID,
+				"type":  "message",
+				"role":  "assistant",
+				"model": model,
+			},
+		})
+		state.messageStarted = true
+	}
+
+	// Text content
+	if chunk.TextDelta != "" {
+		index := 0
+		if state.textIndex == nil {
+			state.textIndex = new(int)
+			*state.textIndex = state.nextIndex
+			index = *state.textIndex
+			state.nextIndex++
+			sendAnthropicEvent(w, flusher, "content_block_start", map[string]any{
+				"type":  "content_block_start",
+				"index": index,
+				"content_block": map[string]any{
+					"type": "text",
+				},
+			})
+		} else {
+			index = *state.textIndex
+		}
+		sendAnthropicEvent(w, flusher, "content_block_delta", map[string]any{
+			"type":  "content_block_delta",
+			"index": index,
+			"delta": map[string]any{
+				"type": "text_delta",
+				"text": chunk.TextDelta,
+			},
+		})
+	}
+
+	// Tool calls
+	for _, tc := range chunk.ToolCallDeltas {
+		idx, ok := state.toolIndex[tc.ID]
+		if !ok {
+			idx = state.nextIndex
+			state.nextIndex++
+			state.toolIndex[tc.ID] = idx
+			sendAnthropicEvent(w, flusher, "content_block_start", map[string]any{
+				"type":  "content_block_start",
+				"index": idx,
+				"content_block": map[string]any{
+					"type": "tool_use",
+					"id":   tc.ID,
+					"name": tc.Function,
+				},
+			})
+		}
+
+		if tc.ArgumentsDelta != "" {
+			sendAnthropicEvent(w, flusher, "content_block_delta", map[string]any{
+				"type":  "content_block_delta",
+				"index": idx,
+				"delta": map[string]any{
+					"type":         "input_json_delta",
+					"partial_json": tc.ArgumentsDelta,
+				},
+			})
+		}
+
+		if tc.Done {
+			sendAnthropicEvent(w, flusher, "content_block_stop", map[string]any{
+				"type":  "content_block_stop",
+				"index": idx,
+			})
+		}
+	}
+}
+
+func sendAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, event string, payload any) {
+	w.Write([]byte("event: " + event + "\n"))
+	if b, err := json.Marshal(payload); err == nil {
+		fmt.Fprintf(w, "data: %s\n\n", b)
+	} else {
+		fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
+	}
+	flusher.Flush()
+}
+
+// handleGeminiStream streams responses in Gemini SSE format.
+func (s *ProxyServer) handleGeminiStream(w http.ResponseWriter, r *http.Request, geminiReq *ai.GeminiGenerateContentRequest) {
+	streamingClient, ok := s.client.(ai.StreamingClient)
+	if !ok {
+		http.Error(w, "Streaming not supported by target provider", http.StatusNotImplemented)
+		return
+	}
+
+	universalReq, err := s.formatConverter.ConvertRequestFromFormat(geminiReq)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to convert request: %v", err), http.StatusBadRequest)
+		return
+	}
+	if s.config.TargetModel != "" && universalReq.Model == "" {
+		universalReq.Model = s.config.TargetModel
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), s.config.Timeout)
+	defer cancel()
+
+	reader, err := streamingClient.Stream(ctx, universalReq)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Provider stream error: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer reader.Close()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported by server", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	for {
+		chunk, err := reader.Recv()
+		if err == io.EOF {
+			fmt.Fprintf(w, "data: [DONE]\n\n")
+			flusher.Flush()
+			return
+		}
+		if err != nil {
+			errPayload := map[string]string{"error": err.Error()}
+			if b, marshalErr := json.Marshal(errPayload); marshalErr == nil {
+				fmt.Fprintf(w, "data: %s\n\n", b)
+			}
+			flusher.Flush()
+			return
+		}
+
+		payload := buildGeminiStreamChunk(chunk)
+		data, err := json.Marshal(payload)
+		if err != nil {
+			errPayload := map[string]string{"error": err.Error()}
+			if b, marshalErr := json.Marshal(errPayload); marshalErr == nil {
+				fmt.Fprintf(w, "data: %s\n\n", b)
+			}
+			flusher.Flush()
+			return
+		}
+
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+
+		if chunk.Done {
+			fmt.Fprintf(w, "data: [DONE]\n\n")
+			flusher.Flush()
+			return
+		}
+	}
+}
+
+// buildGeminiStreamChunk converts a universal StreamChunk to Gemini streaming payload.
+func buildGeminiStreamChunk(chunk *ai.StreamChunk) any {
+	candidate := geminiStreamChunk{
+		Candidates: []geminiStreamCandidate{
+			{
+				Content: geminiStreamContent{},
+			},
+		},
+	}
+	if chunk.TextDelta != "" {
+		txt := chunk.TextDelta
+		candidate.Candidates[0].Content.Parts = append(candidate.Candidates[0].Content.Parts, geminiStreamPart{
+			Text: &txt,
+		})
+	}
+	for _, tc := range chunk.ToolCallDeltas {
+		var args map[string]any
+		if err := json.Unmarshal([]byte(tc.ArgumentsDelta), &args); err != nil {
+			args = map[string]any{"raw": tc.ArgumentsDelta}
+		}
+		candidate.Candidates[0].Content.Parts = append(candidate.Candidates[0].Content.Parts, geminiStreamPart{
+			FunctionCall: &geminiStreamFunctionCall{
+				Name: tc.Function,
+				Args: args,
+			},
+		})
+	}
+	if chunk.Done {
+		candidate.Candidates[0].FinishReason = "STOP"
+	}
+	return candidate
+}
+
+// Local Gemini streaming payload types (compatible with provider schema).
+type geminiStreamChunk struct {
+	Candidates []geminiStreamCandidate `json:"candidates"`
+	Done       bool                    `json:"done,omitempty"`
+}
+
+type geminiStreamCandidate struct {
+	Content       geminiStreamContent `json:"content"`
+	FinishReason  string              `json:"finishReason,omitempty"`
+	SafetyRatings any                 `json:"safetyRatings,omitempty"`
+}
+
+type geminiStreamContent struct {
+	Parts []geminiStreamPart `json:"parts"`
+	Role  string             `json:"role,omitempty"`
+}
+
+type geminiStreamPart struct {
+	Text         *string                   `json:"text,omitempty"`
+	FunctionCall *geminiStreamFunctionCall `json:"functionCall,omitempty"`
+}
+
+type geminiStreamFunctionCall struct {
+	Name string         `json:"name"`
+	Args map[string]any `json:"args"`
 }
 
 // Start starts the HTTP server.

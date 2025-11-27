@@ -223,6 +223,7 @@ type GeminiGenerateContentRequest struct {
 	Contents          []geminiContent `json:"contents"`
 	Tools             []geminiTool    `json:"tools,omitempty"`
 	SystemInstruction *geminiContent  `json:"systemInstruction,omitempty"`
+	Stream            bool            `json:"stream,omitempty"`
 }
 
 // GeminiGenerateContentResponse represents a Gemini generateContent response.

@@ -215,6 +215,7 @@ type AnthropicMessagesRequest struct {
 	Messages  []anthropicMessage `json:"messages"`
 	MaxTokens int                `json:"max_tokens"`
 	Tools     []anthropicTool    `json:"tools,omitempty"`
+	Stream    bool               `json:"stream,omitempty"`
 }
 
 // AnthropicMessagesResponse represents an Anthropic messages response.
