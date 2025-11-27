@@ -17,14 +17,14 @@ import (
 
 // Config holds the proxy server configuration.
 type Config struct {
-	ListenAddr      string
-	APIFormat       ai.Provider // The API format to accept (openai, gemini, anthropic)
-	TargetProvider  ai.Provider // The provider to call (openai, gemini, anthropic)
-	TargetAPIKey    string
-	TargetBaseURL   string
-	TargetModel     string
-	Timeout         time.Duration
-	VerboseLogging  bool
+	ListenAddr     string
+	APIFormat      ai.Provider // The API format to accept (openai, gemini, anthropic)
+	TargetProvider ai.Provider // The provider to call (openai, gemini, anthropic)
+	TargetAPIKey   string
+	TargetBaseURL  string
+	TargetModel    string
+	Timeout        time.Duration
+	VerboseLogging bool
 }
 
 // ProxyServer wraps the AI client and provides format-specific HTTP endpoints.
@@ -101,6 +101,11 @@ func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("Failed to parse OpenAI request: %v", err), http.StatusBadRequest)
 			return
 		}
+		// If stream requested, handle SSE streaming directly.
+		if req.Stream {
+			s.handleOpenAIStream(w, r, &req)
+			return
+		}
 		providerReq = &req
 	case ai.ProviderGemini:
 		var req ai.GeminiGenerateContentRequest
@@ -171,6 +176,164 @@ func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(providerResp); err != nil {
 		log.Printf("Error encoding response: %v", err)
 	}
+}
+
+// handleOpenAIStream streams responses in OpenAI SSE format.
+func (s *ProxyServer) handleOpenAIStream(w http.ResponseWriter, r *http.Request, openaiReq *ai.OpenAIChatCompletionRequest) {
+	streamingClient, ok := s.client.(ai.StreamingClient)
+	if !ok {
+		http.Error(w, "Streaming not supported by target provider", http.StatusNotImplemented)
+		return
+	}
+
+	// Convert to universal request
+	universalReq, err := s.formatConverter.ConvertRequestFromFormat(openaiReq)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to convert request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Override model if configured
+	if s.config.TargetModel != "" && universalReq.Model == "" {
+		universalReq.Model = s.config.TargetModel
+	}
+	originalModel := universalReq.Model
+
+	ctx, cancel := context.WithTimeout(r.Context(), s.config.Timeout)
+	defer cancel()
+
+	reader, err := streamingClient.Stream(ctx, universalReq)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Provider stream error: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer reader.Close()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported by server", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	streamID := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
+
+	for {
+		chunk, err := reader.Recv()
+		if err == io.EOF {
+			fmt.Fprintf(w, "data: [DONE]\n\n")
+			flusher.Flush()
+			return
+		}
+		if err != nil {
+			errPayload := map[string]string{"error": err.Error()}
+			if b, marshalErr := json.Marshal(errPayload); marshalErr == nil {
+				fmt.Fprintf(w, "data: %s\n\n", b)
+			}
+			flusher.Flush()
+			return
+		}
+
+		payload := buildOpenAIStreamChunk(streamID, originalModel, chunk)
+		data, err := json.Marshal(payload)
+		if err != nil {
+			errPayload := map[string]string{"error": err.Error()}
+			if b, marshalErr := json.Marshal(errPayload); marshalErr == nil {
+				fmt.Fprintf(w, "data: %s\n\n", b)
+			}
+			flusher.Flush()
+			return
+		}
+
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+
+		if chunk.Done {
+			fmt.Fprintf(w, "data: [DONE]\n\n")
+			flusher.Flush()
+			return
+		}
+	}
+}
+
+// buildOpenAIStreamChunk converts a universal StreamChunk to OpenAI SSE chunk.
+func buildOpenAIStreamChunk(id, model string, chunk *ai.StreamChunk) *openAIStreamChunk {
+	choice := openAIStreamChoice{
+		Index: 0,
+		Delta: openAIStreamDelta{},
+	}
+	if chunk.TextDelta != "" {
+		choice.Delta.Content = append(choice.Delta.Content, openAIContentPart{
+			Type: "text",
+			Text: chunk.TextDelta,
+		})
+	}
+	for _, tc := range chunk.ToolCallDeltas {
+		choice.Delta.ToolCalls = append(choice.Delta.ToolCalls, openAIToolCallDelta{
+			ID:   tc.ID,
+			Type: tc.Type,
+			Function: openAIFunctionCallDelta{
+				Name:      tc.Function,
+				Arguments: tc.ArgumentsDelta,
+			},
+		})
+	}
+
+	if chunk.Done {
+		if len(choice.Delta.ToolCalls) > 0 {
+			choice.FinishReason = "tool_calls"
+		} else {
+			choice.FinishReason = "stop"
+		}
+	}
+
+	return &openAIStreamChunk{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: time.Now().Unix(),
+		Model:   model,
+		Choices: []openAIStreamChoice{choice},
+	}
+}
+
+// Minimal OpenAI streaming chunk structs for SSE responses.
+type openAIStreamChunk struct {
+	ID      string               `json:"id"`
+	Object  string               `json:"object"`
+	Created int64                `json:"created"`
+	Model   string               `json:"model"`
+	Choices []openAIStreamChoice `json:"choices"`
+}
+
+type openAIStreamChoice struct {
+	Index        int               `json:"index"`
+	Delta        openAIStreamDelta `json:"delta"`
+	FinishReason string            `json:"finish_reason,omitempty"`
+}
+
+type openAIStreamDelta struct {
+	Role      string                `json:"role,omitempty"`
+	Content   []openAIContentPart   `json:"content,omitempty"`
+	ToolCalls []openAIToolCallDelta `json:"tool_calls,omitempty"`
+}
+
+type openAIContentPart struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+type openAIToolCallDelta struct {
+	ID       string                  `json:"id,omitempty"`
+	Type     string                  `json:"type,omitempty"`
+	Function openAIFunctionCallDelta `json:"function"`
+}
+
+type openAIFunctionCallDelta struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 }
 
 // Start starts the HTTP server.
