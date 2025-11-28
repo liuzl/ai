@@ -60,6 +60,17 @@ func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request, form
 
 	model := universalReq.Model
 
+	// Special handling for Gemini: extract model from URL if not in request body
+	if format == ai.ProviderGemini && model == "" {
+		model = extractGeminiModelFromURL(r.URL.Path)
+		if model == "" {
+			s.handleError(w, r, format, "", "", fmt.Errorf("failed to extract model from URL: %s", r.URL.Path), http.StatusBadRequest)
+			return
+		}
+		// Update the universal request with the extracted model
+		universalReq.Model = model
+	}
+
 	// Look up provider for model in config
 	provider, err := s.config.GetProviderForModel(model)
 	if err != nil {
@@ -309,4 +320,29 @@ func getErrorType(err error) string {
 		}
 		return "unknown"
 	}
+}
+
+// extractGeminiModelFromURL extracts the model name from Gemini URL path
+// Example: /gemini/v1/models/gemini-2.0-flash:generateContent → gemini-2.0-flash
+// Example: /gemini/v1beta/models/gemini-1.5-pro:streamGenerateContent → gemini-1.5-pro
+func extractGeminiModelFromURL(path string) string {
+	// Split the path by "/"
+	parts := strings.Split(path, "/")
+
+	// Look for "models" in the path
+	for i, part := range parts {
+		if part == "models" && i+1 < len(parts) {
+			// The next part contains the model name
+			modelPart := parts[i+1]
+
+			// Remove the action suffix (:generateContent, :streamGenerateContent, etc.)
+			if colonIdx := strings.Index(modelPart, ":"); colonIdx != -1 {
+				return modelPart[:colonIdx]
+			}
+
+			return modelPart
+		}
+	}
+
+	return ""
 }

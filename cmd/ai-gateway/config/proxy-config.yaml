@@ -4,43 +4,43 @@ version: "1.0"
 # Each model is mapped to a specific backend provider
 models:
   # OpenAI models
-  - name: "gpt-4"
+  - name: "gpt-5.1"
     provider: "openai"
-    description: "GPT-4 model"
+    description: "GPT-5.1"
 
-  - name: "gpt-4o"
+  - name: "gpt-5.1-codex"
     provider: "openai"
-    description: "GPT-4 Omni"
+    description: "GPT-5.1 Codex"
 
-  - name: "gpt-4o-mini"
+  - name: "gpt-5.1-codex-mini"
     provider: "openai"
-    description: "GPT-4 Omni Mini"
-
-  # Anthropic models
-  - name: "claude-3-5-sonnet-20241022"
-    provider: "anthropic"
-    description: "Claude 3.5 Sonnet"
-
-  - name: "claude-3-5-haiku-20241022"
-    provider: "anthropic"
-    description: "Claude 3.5 Haiku"
-
-  - name: "claude-3-opus-20240229"
-    provider: "anthropic"
-    description: "Claude 3 Opus"
+    description: "GPT-5.1 Codex Mini"
 
   # Gemini models
-  - name: "gemini-2.0-flash-exp"
+  - name: "gemini-3-pro-preview"
     provider: "gemini"
-    description: "Gemini 2.0 Flash Experimental"
+    description: "Gemini 3 Pro Preview"
 
-  - name: "gemini-1.5-pro"
+  - name: "gemini-2.5-pro"
     provider: "gemini"
-    description: "Gemini 1.5 Pro"
+    description: "Gemini 2.5 Pro"
 
-  - name: "gemini-1.5-flash"
+  - name: "gemini-2.5-flash"
     provider: "gemini"
-    description: "Gemini 1.5 Flash"
+    description: "Gemini 2.5 Flash"
+
+  - name: "gemini-2.5-flash-lite"
+    provider: "gemini"
+    description: "Gemini 2.5 Flash Lite"
+
+  - name: "gemini-2.0-flash"
+    provider: "gemini"
+    description: "Gemini 2.0 Flash"
+
+  # Anthropic models (via BigModel Anthropic-compatible API)
+  - name: "glm-4.6"
+    provider: "anthropic"
+    description: "GLM-4.6 via Anthropic API"
 
 # Optional: fallback provider for unknown models
 # default_provider: "openai"
