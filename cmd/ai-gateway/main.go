@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,14 +26,14 @@ func main() {
 
 	// Load .env file if it exists
 	if err := loadEnvFile(*envFile); err != nil {
-		log.Fatalf("Error loading environment file: %v", err)
+		rest.Log().Fatal().Err(err).Msg("Error loading environment file")
 	}
 
 	// Load configuration
 	rest.Log().Info().Msgf("Loading configuration from %s", *configFile)
 	config, err := LoadConfig(*configFile)
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		rest.Log().Fatal().Err(err).Msg("Failed to load configuration")
 	}
 
 	// Create server configuration
@@ -47,7 +46,7 @@ func main() {
 	rest.Log().Info().Msg("Initializing proxy server...")
 	server, err := NewProxyServer(config, serverCfg)
 	if err != nil {
-		log.Fatalf("Failed to create proxy server: %v", err)
+		rest.Log().Fatal().Err(err).Msg("Failed to create proxy server")
 	}
 
 	// Start server in a goroutine
@@ -64,7 +63,7 @@ func main() {
 	select {
 	case err := <-serverErrors:
 		if err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			rest.Log().Fatal().Err(err).Msg("Server error")
 		}
 	case sig := <-stop:
 		rest.Log().Info().Msgf("Received signal: %v", sig)
@@ -75,7 +74,7 @@ func main() {
 
 		// Attempt graceful shutdown
 		if err := server.Shutdown(ctx); err != nil {
-			log.Fatalf("Server shutdown error: %v", err)
+			rest.Log().Fatal().Err(err).Msg("Server shutdown error")
 		}
 
 		rest.Log().Info().Msg("Server stopped gracefully")
