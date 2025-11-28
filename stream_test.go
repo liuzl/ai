@@ -131,14 +131,33 @@ func TestGeminiStreaming(t *testing.T) {
 		if r.URL.Path != "/v1beta/models/gemini-2.5-flash:streamGenerateContent" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Content-Type", "application/json")
 		flusher, _ := w.(http.Flusher)
 
-		fmt.Fprintf(w, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}]}\n\n")
+		// Send opening bracket
+		fmt.Fprintf(w, "[\n")
 		flusher.Flush()
-		fmt.Fprintf(w, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"do\",\"args\":{\"x\":1}}}]}}]}\n\n")
+
+		// First chunk
+		fmt.Fprintf(w, "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}]}")
 		flusher.Flush()
-		fmt.Fprintf(w, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"!\"}]},\"finishReason\":\"STOP\"}]}\n\n")
+
+		fmt.Fprintf(w, ",\n")
+		flusher.Flush()
+
+		// Second chunk (function call)
+		fmt.Fprintf(w, "{\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"do\",\"args\":{\"x\":1}}}]}}]}")
+		flusher.Flush()
+
+		fmt.Fprintf(w, ",\n")
+		flusher.Flush()
+
+		// Third chunk (finish reason)
+		fmt.Fprintf(w, "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"!\"}]},\"finishReason\":\"STOP\"}]}")
+		flusher.Flush()
+
+		// Closing bracket
+		fmt.Fprintf(w, "\n]")
 		flusher.Flush()
 	}))
 	defer server.Close()

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
+	"sync"
 )
 
 // geminiAdapter implements the providerAdapter interface for Google Gemini.
@@ -34,258 +34,28 @@ func (a *geminiAdapter) newStreamDecoder(r io.Reader) streamDecoder {
 	return newJSONArrayDecoder(r)
 }
 
+// buildRequestPayload converts the universal Request into the provider-specific
+// request body struct. It handles parallel downloading of external media resources.
 func (a *geminiAdapter) buildRequestPayload(ctx context.Context, req *Request) (any, error) {
+	// 1. Prepare skeleton contents and identify download tasks
+	contents, tasks, err := a.prepareContents(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare contents: %w", err)
+	}
+
+	// 2. Execute downloads in parallel
+	if len(tasks) > 0 {
+		if err := a.executeDownloads(ctx, tasks); err != nil {
+			return nil, fmt.Errorf("failed to download media: %w", err)
+		}
+	}
+
+	// 3. Assemble final request
 	geminiReq := &geminiGenerateContentRequest{
-		Contents: make([]geminiContent, len(req.Messages)),
+		Contents: contents,
 	}
 
-	for i, msg := range req.Messages {
-		var role string
-		parts := []geminiPart{}
-
-		switch msg.Role {
-		case RoleUser:
-			role = "user"
-			// Handle multimodal content if present
-			if len(msg.ContentParts) > 0 {
-				for _, part := range msg.ContentParts {
-					switch part.Type {
-					case ContentTypeText:
-						parts = append(parts, geminiPart{Text: &part.Text})
-					case ContentTypeImage:
-						if part.ImageSource != nil {
-							var data, format string
-							var err error
-
-							switch part.ImageSource.Type {
-							case ImageSourceTypeBase64:
-								// Use provided base64 data
-								data = part.ImageSource.Data
-								format = part.ImageSource.Format
-								// Remove data URI prefix if present
-								if strings.HasPrefix(data, "data:") {
-									if idx := strings.Index(data, ","); idx != -1 {
-										data = data[idx+1:]
-									}
-								}
-							case ImageSourceTypeURL:
-								// Gemini doesn't support URLs directly, so download and convert to base64
-								// Use immediate invocation to ensure context cancellation happens per iteration
-								func() {
-									downloadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-									defer cancel()
-									data, format, err = downloadImageToBase64(downloadCtx, part.ImageSource.URL)
-								}()
-								if err != nil {
-									return nil, fmt.Errorf("failed to download image from URL for Gemini: %w", err)
-								}
-							}
-
-							if data != "" {
-								// Determine MIME type
-								mimeType := "image/png" // default
-								if format != "" {
-									mimeType = "image/" + format
-									if format == "jpg" {
-										mimeType = "image/jpeg"
-									}
-								}
-								parts = append(parts, geminiPart{
-									InlineData: &geminiInlineData{
-										MimeType: mimeType,
-										Data:     data,
-									},
-								})
-							}
-						}
-					case ContentTypeAudio:
-						if part.AudioSource != nil {
-							var data string
-							var err error
-							format := part.AudioSource.Format
-
-							switch part.AudioSource.Type {
-							case MediaSourceTypeBase64:
-								data = part.AudioSource.Data
-							case MediaSourceTypeURL:
-								// Download audio from URL
-								// Use immediate invocation to ensure context cancellation happens per iteration
-								var downloaded string
-								func() {
-									downloadCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-									defer cancel()
-									var dlErr error
-									downloaded, dlErr = downloadMediaToBase64(downloadCtx, part.AudioSource.URL)
-									err = dlErr
-								}()
-								if err != nil {
-									return nil, fmt.Errorf("failed to download audio from URL for Gemini: %w", err)
-								}
-								data = downloaded
-							}
-
-							if data != "" {
-								// Determine MIME type based on format
-								mimeType := "audio/" + format
-								if format == "mp3" {
-									mimeType = "audio/mpeg"
-								}
-								parts = append(parts, geminiPart{
-									InlineData: &geminiInlineData{
-										MimeType: mimeType,
-										Data:     data,
-									},
-								})
-							}
-						}
-					case ContentTypeVideo:
-						if part.VideoSource != nil {
-							var data string
-							var err error
-							format := part.VideoSource.Format
-
-							switch part.VideoSource.Type {
-							case MediaSourceTypeBase64:
-								data = part.VideoSource.Data
-							case MediaSourceTypeURL:
-								// Download video from URL
-								// Use immediate invocation to ensure context cancellation happens per iteration
-								var downloaded string
-								func() {
-									downloadCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
-									defer cancel()
-									var dlErr error
-									downloaded, dlErr = downloadMediaToBase64(downloadCtx, part.VideoSource.URL)
-									err = dlErr
-								}()
-								if err != nil {
-									return nil, fmt.Errorf("failed to download video from URL for Gemini: %w", err)
-								}
-								data = downloaded
-							}
-
-							if data != "" {
-								// Determine MIME type based on format
-								mimeType := "video/" + format
-								if format == "3gpp" {
-									mimeType = "video/3gpp"
-								}
-								parts = append(parts, geminiPart{
-									InlineData: &geminiInlineData{
-										MimeType: mimeType,
-										Data:     data,
-									},
-								})
-							}
-						}
-					case ContentTypeDocument:
-						if part.DocumentSource != nil {
-							var data string
-							var err error
-							mimeType := part.DocumentSource.MimeType
-
-							switch part.DocumentSource.Type {
-							case MediaSourceTypeBase64:
-								data = part.DocumentSource.Data
-							case MediaSourceTypeURL:
-								// Download document from URL
-								// Use immediate invocation to ensure context cancellation happens per iteration
-								var downloaded string
-								func() {
-									downloadCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-									defer cancel()
-									var dlErr error
-									downloaded, dlErr = downloadMediaToBase64(downloadCtx, part.DocumentSource.URL)
-									err = dlErr
-								}()
-								if err != nil {
-									return nil, fmt.Errorf("failed to download document from URL for Gemini: %w", err)
-								}
-								data = downloaded
-							}
-
-							if data != "" && mimeType != "" {
-								parts = append(parts, geminiPart{
-									InlineData: &geminiInlineData{
-										MimeType: mimeType,
-										Data:     data,
-									},
-								})
-							}
-						}
-					default:
-						return nil, fmt.Errorf("gemini provider does not support content type: %s", part.Type)
-					}
-				}
-			} else if msg.Content != "" {
-				// Backward compatibility: simple text content
-				parts = append(parts, geminiPart{Text: &msg.Content})
-			}
-		case RoleAssistant:
-			role = "model"
-			// Handle multimodal content if present
-			if len(msg.ContentParts) > 0 {
-				for _, part := range msg.ContentParts {
-					if part.Type == ContentTypeText {
-						parts = append(parts, geminiPart{Text: &part.Text})
-					}
-				}
-			} else if msg.Content != "" {
-				// Backward compatibility: simple text content
-				parts = append(parts, geminiPart{Text: &msg.Content})
-			}
-			if len(msg.ToolCalls) > 0 {
-				for _, tc := range msg.ToolCalls {
-					var args map[string]any
-					if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
-						return nil, fmt.Errorf("failed to unmarshal tool call arguments for gemini: %w", err)
-					}
-					parts = append(parts, geminiPart{
-						FunctionCall: &geminiFunctionCall{
-							Name: tc.Function,
-							Args: args,
-						},
-					})
-				}
-			}
-		case RoleTool:
-			role = "user" // Gemini represents tool responses as a user message
-			if i > 0 {
-				prevMsg := req.Messages[i-1]
-				var matchingToolCall *ToolCall
-				for _, tc := range prevMsg.ToolCalls {
-					if tc.ID == msg.ToolCallID {
-						matchingToolCall = &tc
-						break
-					}
-				}
-
-				if matchingToolCall != nil {
-					var responseData map[string]any
-					if err := json.Unmarshal([]byte(msg.Content), &responseData); err != nil {
-						responseData = map[string]any{"content": msg.Content}
-					}
-					parts = append(parts, geminiPart{
-						FunctionResponse: &geminiFunctionResponse{
-							Name:     matchingToolCall.Function,
-							Response: responseData,
-						},
-					})
-				}
-			}
-		default: // Fallback for system or other roles
-			role = "user"
-			if msg.Content != "" {
-				parts = append(parts, geminiPart{Text: &msg.Content})
-			}
-		}
-
-		geminiReq.Contents[i] = geminiContent{
-			Role:  role,
-			Parts: parts,
-		}
-	}
-
+	// Tools
 	if len(req.Tools) > 0 {
 		geminiReq.Tools = make([]geminiTool, len(req.Tools))
 		for i, t := range req.Tools {
@@ -301,6 +71,7 @@ func (a *geminiAdapter) buildRequestPayload(ctx context.Context, req *Request) (
 		}
 	}
 
+	// System Prompt
 	if req.SystemPrompt != "" {
 		geminiReq.SystemInstruction = &geminiContent{
 			Parts: []geminiPart{
@@ -309,12 +80,329 @@ func (a *geminiAdapter) buildRequestPayload(ctx context.Context, req *Request) (
 		}
 	}
 
-	// Set generation config with reasonable defaults
+	// Configuration
 	geminiReq.GenerationConfig = &geminiGenConfig{
-		MaxOutputTokens: 8192, // Set a reasonable default
+		MaxOutputTokens: 8192,
 	}
 
 	return geminiReq, nil
+}
+
+// downloadTask represents a pending media download operation.
+type downloadTask struct {
+	URL        string
+	Type       ContentType
+	TargetPart *geminiPart // Pointer to the part to populate upon success
+}
+
+func (a *geminiAdapter) prepareContents(req *Request) ([]geminiContent, []*downloadTask, error) {
+	contents := make([]geminiContent, len(req.Messages))
+	var allTasks []*downloadTask
+
+	for i, msg := range req.Messages {
+		role := a.mapRole(msg.Role)
+		parts, tasks, err := a.processMessageParts(msg, req.Messages, i)
+		if err != nil {
+			return nil, nil, fmt.Errorf("message[%d]: %w", i, err)
+		}
+
+		contents[i] = geminiContent{
+			Role:  role,
+			Parts: parts,
+		}
+		allTasks = append(allTasks, tasks...)
+	}
+
+	return contents, allTasks, nil
+}
+
+func (a *geminiAdapter) mapRole(role Role) string {
+	switch role {
+	case RoleUser, RoleTool:
+		return "user"
+	case RoleAssistant:
+		return "model"
+	default:
+		return "user"
+	}
+}
+
+func (a *geminiAdapter) processMessageParts(msg Message, allMsgs []Message, msgIdx int) ([]geminiPart, []*downloadTask, error) {
+	var parts []geminiPart
+	var tasks []*downloadTask
+
+	// 1. Handle ContentParts (Multimodal)
+	if len(msg.ContentParts) > 0 {
+		for _, part := range msg.ContentParts {
+			p, t, err := a.processSinglePart(part)
+			if err != nil {
+				return nil, nil, err
+			}
+			parts = append(parts, p)
+			if t != nil {
+				tasks = append(tasks, t)
+			}
+		}
+	} else if msg.Content != "" && msg.Role != RoleTool {
+		// 2. Handle Simple Text (Backward Compatibility)
+		// Tool messages handle content differently below
+		parts = append(parts, geminiPart{Text: &msg.Content})
+	}
+
+	// 3. Handle Tool Calls (Assistant -> Model)
+	if msg.Role == RoleAssistant && len(msg.ToolCalls) > 0 {
+		for _, tc := range msg.ToolCalls {
+			var args map[string]any
+			if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
+				return nil, nil, fmt.Errorf("invalid tool call arguments: %w", err)
+			}
+			parts = append(parts, geminiPart{
+				FunctionCall: &geminiFunctionCall{
+					Name: tc.Function,
+					Args: args,
+				},
+			})
+		}
+	}
+
+	// 4. Handle Tool Responses (Tool -> User)
+	if msg.Role == RoleTool {
+		// Find matching tool call in previous messages
+		// Note: This relies on the convention that tool response follows tool call.
+		// In complex histories, we might need a better lookup, but this matches original logic.
+		var matchingToolCall *ToolCall
+		if msgIdx > 0 {
+			prevMsg := allMsgs[msgIdx-1]
+			for _, tc := range prevMsg.ToolCalls {
+				if tc.ID == msg.ToolCallID {
+					matchingToolCall = &tc
+					break
+				}
+			}
+		}
+
+		if matchingToolCall != nil {
+			var responseData map[string]any
+			if err := json.Unmarshal([]byte(msg.Content), &responseData); err != nil {
+				// Wrap raw content if not JSON
+				responseData = map[string]any{"content": msg.Content}
+			}
+			parts = append(parts, geminiPart{
+				FunctionResponse: &geminiFunctionResponse{
+					Name:     matchingToolCall.Function,
+					Response: responseData,
+				},
+			})
+		} else {
+			// Fallback if no matching tool call found (should generally be validated against)
+			// Treat as simple text
+			if msg.Content != "" {
+				parts = append(parts, geminiPart{Text: &msg.Content})
+			}
+		}
+	}
+
+	return parts, tasks, nil
+}
+
+func (a *geminiAdapter) processSinglePart(part ContentPart) (geminiPart, *downloadTask, error) {
+	switch part.Type {
+	case ContentTypeText:
+		return geminiPart{Text: &part.Text}, nil, nil
+
+	case ContentTypeImage:
+		if part.ImageSource == nil {
+			return geminiPart{}, nil, nil
+		}
+		if part.ImageSource.Type == ImageSourceTypeURL {
+			// Create placeholder part to be filled by download task
+			p := geminiPart{InlineData: &geminiInlineData{}}
+			return p, &downloadTask{
+				URL:        part.ImageSource.URL,
+				Type:       ContentTypeImage,
+				TargetPart: &p,
+			}, nil
+		} else {
+			// Handle Base64 immediately
+			data := cleanBase64(part.ImageSource.Data)
+			mimeType := "image/png"
+			if part.ImageSource.Format != "" {
+				mimeType = "image/" + part.ImageSource.Format
+				if part.ImageSource.Format == "jpg" {
+					mimeType = "image/jpeg"
+				}
+			}
+			return geminiPart{InlineData: &geminiInlineData{
+				MimeType: mimeType,
+				Data:     data,
+			}}, nil, nil
+		}
+
+	case ContentTypeAudio:
+		if part.AudioSource == nil {
+			return geminiPart{}, nil, nil
+		}
+		if part.AudioSource.Type == MediaSourceTypeURL {
+			p := geminiPart{InlineData: &geminiInlineData{}}
+			// Store format in MimeType temporarily or deduce later?
+			// The download task needs to know the expected format to set MimeType correctly
+			// We can set a temporary MimeType based on format and fix it if needed
+			mimeType := "audio/" + part.AudioSource.Format
+			if part.AudioSource.Format == "mp3" {
+				mimeType = "audio/mpeg"
+			}
+			p.InlineData.MimeType = mimeType
+
+			return p, &downloadTask{
+				URL:        part.AudioSource.URL,
+				Type:       ContentTypeAudio,
+				TargetPart: &p,
+			}, nil
+		} else {
+			mimeType := "audio/" + part.AudioSource.Format
+			if part.AudioSource.Format == "mp3" {
+				mimeType = "audio/mpeg"
+			}
+			return geminiPart{InlineData: &geminiInlineData{
+				MimeType: mimeType,
+				Data:     part.AudioSource.Data,
+			}}, nil, nil
+		}
+
+	case ContentTypeVideo:
+		if part.VideoSource == nil {
+			return geminiPart{}, nil, nil
+		}
+		if part.VideoSource.Type == MediaSourceTypeURL {
+			p := geminiPart{InlineData: &geminiInlineData{}}
+			mimeType := "video/" + part.VideoSource.Format
+			if part.VideoSource.Format == "3gpp" {
+				mimeType = "video/3gpp"
+			}
+			p.InlineData.MimeType = mimeType
+
+			return p, &downloadTask{
+				URL:        part.VideoSource.URL,
+				Type:       ContentTypeVideo,
+				TargetPart: &p,
+			}, nil
+		} else {
+			mimeType := "video/" + part.VideoSource.Format
+			if part.VideoSource.Format == "3gpp" {
+				mimeType = "video/3gpp"
+			}
+			return geminiPart{InlineData: &geminiInlineData{
+				MimeType: mimeType,
+				Data:     part.VideoSource.Data,
+			}}, nil, nil
+		}
+
+	case ContentTypeDocument:
+		if part.DocumentSource == nil {
+			return geminiPart{}, nil, nil
+		}
+		if part.DocumentSource.Type == MediaSourceTypeURL {
+			p := geminiPart{InlineData: &geminiInlineData{MimeType: part.DocumentSource.MimeType}}
+			return p, &downloadTask{
+				URL:        part.DocumentSource.URL,
+				Type:       ContentTypeDocument,
+				TargetPart: &p,
+			}, nil
+		} else {
+			return geminiPart{InlineData: &geminiInlineData{
+				MimeType: part.DocumentSource.MimeType,
+				Data:     part.DocumentSource.Data,
+			}}, nil, nil
+		}
+
+	default:
+		return geminiPart{}, nil, fmt.Errorf("unsupported content type: %s", part.Type)
+	}
+}
+
+func cleanBase64(data string) string {
+	if strings.HasPrefix(data, "data:") {
+		if idx := strings.Index(data, ","); idx != -1 {
+			return data[idx+1:]
+		}
+	}
+	return data
+}
+
+func (a *geminiAdapter) executeDownloads(ctx context.Context, tasks []*downloadTask) error {
+	var wg sync.WaitGroup
+	// Buffered channel to collect first error
+	errChan := make(chan error, len(tasks))
+	// Semaphore to limit concurrency (prevent fd exhaustion)
+	sem := make(chan struct{}, 5)
+
+	for _, task := range tasks {
+		wg.Add(1)
+		go func(t *downloadTask) {
+			defer wg.Done()
+
+			// Acquire semaphore
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return // Context cancelled, skip
+			}
+			defer func() { <-sem }()
+
+			// Check context again
+			if ctx.Err() != nil {
+				return
+			}
+
+			var data, format string
+			var err error
+
+			// Use appropriate downloader based on type
+			// Note: We use a shorter timeout for individual downloads if needed,
+			// but relying on parent context is usually better.
+			// We'll trust the parent context to handle overall timeout.
+			switch t.Type {
+			case ContentTypeImage:
+				data, format, err = downloadImageToBase64(ctx, t.URL)
+				if err == nil && t.TargetPart.InlineData.MimeType == "" {
+					// Detect mimetype if not already set (for images)
+					t.TargetPart.InlineData.MimeType = "image/" + format
+					if format == "jpg" {
+						t.TargetPart.InlineData.MimeType = "image/jpeg"
+					}
+				}
+			default:
+				// Audio, Video, Document use generic downloader
+				data, err = downloadMediaToBase64(ctx, t.URL)
+			}
+
+			if err != nil {
+				// Non-blocking send to error channel
+				select {
+				case errChan <- fmt.Errorf("download failed for %s: %w", t.URL, err):
+				default:
+				}
+				return
+			}
+
+			// Assign result
+			t.TargetPart.InlineData.Data = data
+		}(task)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	// Check for errors
+	if err := <-errChan; err != nil {
+		return err
+	}
+	// Check context one last time
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	return nil
 }
 
 func (a *geminiAdapter) parseResponse(providerResp []byte) (*Response, error) {
@@ -432,71 +520,4 @@ func (a *geminiAdapter) parseStreamEvent(event *sseEvent, acc *streamAccumulator
 	}
 
 	return chunk, done, nil
-}
-
-// --- Private Gemini Specific Types ---
-// (These are the same structs from the original client_gemini.go)
-
-type geminiGenerateContentRequest struct {
-	Contents          []geminiContent  `json:"contents"`
-	Tools             []geminiTool     `json:"tools,omitempty"`
-	SystemInstruction *geminiContent   `json:"systemInstruction,omitempty"`
-	GenerationConfig  *geminiGenConfig `json:"generationConfig,omitempty"`
-}
-
-type geminiGenConfig struct {
-	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
-}
-
-type geminiContent struct {
-	Parts []geminiPart `json:"parts"`
-	Role  string       `json:"role,omitempty"`
-}
-
-type geminiPart struct {
-	Text             *string                 `json:"text,omitempty"`
-	InlineData       *geminiInlineData       `json:"inlineData,omitempty"`
-	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
-	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
-}
-
-type geminiInlineData struct {
-	MimeType string `json:"mimeType"` // e.g., "image/png", "image/jpeg"
-	Data     string `json:"data"`     // Base64-encoded image data
-}
-
-type geminiFunctionCall struct {
-	Name string         `json:"name"`
-	Args map[string]any `json:"args"`
-}
-
-type geminiFunctionResponse struct {
-	Name     string         `json:"name"`
-	Response map[string]any `json:"response"`
-}
-
-type geminiTool struct {
-	FunctionDeclarations []geminiFunctionDeclaration `json:"functionDeclarations,omitempty"`
-}
-
-type geminiFunctionDeclaration struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Parameters  json.RawMessage `json:"parameters"`
-}
-
-type geminiGenerateContentResponse struct {
-	Candidates []geminiCandidate `json:"candidates"`
-}
-
-type geminiCandidate struct {
-	Content geminiContent `json:"content"`
-	// FinishReason is only used for streaming responses.
-	FinishReason string `json:"finishReason,omitempty"`
-}
-
-// geminiStreamResponse mirrors the streaming payload shape.
-type geminiStreamResponse struct {
-	Candidates []geminiCandidate `json:"candidates"`
-	Done       bool              `json:"done,omitempty"`
 }

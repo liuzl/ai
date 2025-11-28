@@ -45,19 +45,29 @@ func downloadImageToBase64(ctx context.Context, imageURL string) (string, string
 		return "", "", fmt.Errorf("failed to download image: HTTP %d", resp.StatusCode)
 	}
 
-	// Read image data with size limit to prevent memory exhaustion
-	imageData, err := io.ReadAll(io.LimitReader(resp.Body, maxImageSize))
-	if err != nil {
-		return "", "", fmt.Errorf("failed to read image data: %w", err)
-	}
-
 	// Detect format from Content-Type header
 	format := detectImageFormat(resp.Header.Get("Content-Type"), imageURL)
 
-	// Encode to base64
-	base64Data := base64.StdEncoding.EncodeToString(imageData)
+	// Stream encode to base64 using strings.Builder to minimize memory usage
+	// (Avoids holding the raw image bytes in memory)
+	var b strings.Builder
+	// Optional: Pre-allocate builder if Content-Length is available and reasonable
+	if resp.ContentLength > 0 && resp.ContentLength <= maxImageSize {
+		// Base64 expansion is roughly 4/3
+		growSize := int(resp.ContentLength*4/3 + 4)
+		b.Grow(growSize)
+	}
 
-	return base64Data, format, nil
+	encoder := base64.NewEncoder(base64.StdEncoding, &b)
+
+	// Copy with size limit
+	if _, err := io.Copy(encoder, io.LimitReader(resp.Body, maxImageSize)); err != nil {
+		encoder.Close()
+		return "", "", fmt.Errorf("failed to read/encode image data: %w", err)
+	}
+	encoder.Close()
+
+	return b.String(), format, nil
 }
 
 // detectImageFormat detects image format from Content-Type header or URL extension.
@@ -126,14 +136,23 @@ func downloadMediaToBase64(ctx context.Context, mediaURL string) (string, error)
 		return "", fmt.Errorf("failed to download media: HTTP %d", resp.StatusCode)
 	}
 
-	// Read media data with size limit to prevent memory exhaustion
-	mediaData, err := io.ReadAll(io.LimitReader(resp.Body, maxMediaSize))
-	if err != nil {
-		return "", fmt.Errorf("failed to read media data: %w", err)
+	// Stream encode to base64 using strings.Builder to minimize memory usage
+	var b strings.Builder
+	// Optional: Pre-allocate builder if Content-Length is available and reasonable
+	if resp.ContentLength > 0 && resp.ContentLength <= maxMediaSize {
+		// Base64 expansion is roughly 4/3
+		growSize := int(resp.ContentLength*4/3 + 4)
+		b.Grow(growSize)
 	}
 
-	// Encode to base64
-	base64Data := base64.StdEncoding.EncodeToString(mediaData)
+	encoder := base64.NewEncoder(base64.StdEncoding, &b)
 
-	return base64Data, nil
+	// Copy with size limit
+	if _, err := io.Copy(encoder, io.LimitReader(resp.Body, maxMediaSize)); err != nil {
+		encoder.Close()
+		return "", fmt.Errorf("failed to read/encode media data: %w", err)
+	}
+	encoder.Close()
+
+	return b.String(), nil
 }
