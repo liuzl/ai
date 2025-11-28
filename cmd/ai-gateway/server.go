@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/liuzl/ai"
+	"zliu.org/goutil/rest"
 )
 
 // ServerConfig holds server configuration
@@ -23,19 +24,17 @@ type ProxyServer struct {
 	clientPool       *ClientPool
 	converterFactory *ai.FormatConverterFactory
 	metrics          *MetricsCollector
-	logger           *Logger
 	httpServer       *http.Server
 }
 
 // NewProxyServer creates a new ProxyServer
-func NewProxyServer(cfg *ProxyConfig, serverCfg *ServerConfig, logger *Logger) (*ProxyServer, error) {
+func NewProxyServer(cfg *ProxyConfig, serverCfg *ServerConfig) (*ProxyServer, error) {
 	s := &ProxyServer{
 		config:           cfg,
 		serverCfg:        serverCfg,
 		clientPool:       NewClientPool(),
 		converterFactory: &ai.FormatConverterFactory{},
 		metrics:          NewMetricsCollector(),
-		logger:           logger,
 	}
 
 	// Validate that all configured providers have credentials
@@ -60,15 +59,15 @@ func (s *ProxyServer) Start() error {
 		Handler: handler,
 	}
 
-	s.logger.InfoMsg(fmt.Sprintf("Starting proxy server on %s", s.serverCfg.ListenAddr))
-	s.logger.InfoMsg(fmt.Sprintf("Configured %d models", len(s.config.Models)))
+	rest.Log().Info().Msgf("Starting proxy server on %s", s.serverCfg.ListenAddr)
+	rest.Log().Info().Msgf("Configured %d models", len(s.config.Models))
 
 	return s.httpServer.ListenAndServe()
 }
 
 // Shutdown gracefully shuts down the server
 func (s *ProxyServer) Shutdown(ctx context.Context) error {
-	s.logger.InfoMsg("Shutting down server...")
+	rest.Log().Info().Msg("Shutting down server...")
 	return s.httpServer.Shutdown(ctx)
 }
 
@@ -92,8 +91,8 @@ func (s *ProxyServer) setupRoutes() *http.ServeMux {
 // applyMiddleware applies middleware chain
 func (s *ProxyServer) applyMiddleware(h http.Handler) http.Handler {
 	// Apply in reverse order (last middleware wraps first)
-	h = RecoveryMiddleware(s.logger)(h)
-	h = LoggingMiddleware(s.logger)(h)
+	h = RecoveryMiddleware()(h)
+	h = LoggingMiddleware()(h)
 	h = RequestIDMiddleware(h)
 	return h
 }
@@ -124,6 +123,6 @@ func (s *ProxyServer) validateProviders() error {
 		}
 	}
 
-	s.logger.InfoMsg(fmt.Sprintf("Validated %d providers", len(providers)))
+	rest.Log().Info().Msgf("Validated %d providers", len(providers))
 	return nil
 }

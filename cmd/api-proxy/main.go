@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/liuzl/ai"
+	"zliu.org/goutil/rest"
 )
 
 var streamCounter uint64
@@ -74,22 +75,40 @@ func NewProxyServer(config *Config) (*ProxyServer, error) {
 
 // handleRequest handles incoming requests.
 func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request) {
+	startTime := time.Now()
+
+	rest.Log().Info().
+		Str("method", r.Method).
+		Str("path", r.URL.Path).
+		Str("remote_addr", r.RemoteAddr).
+		Msg("request started")
+
+	defer func() {
+		rest.Log().Info().
+			Str("method", r.Method).
+			Str("path", r.URL.Path).
+			Dur("duration", time.Since(startTime)).
+			Msg("request completed")
+	}()
+
 	if r.Method != http.MethodPost {
+		rest.Log().Warn().
+			Str("method", r.Method).
+			Str("path", r.URL.Path).
+			Msg("method not allowed")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	// If verbose logging is enabled, use a TeeReader to capture the body
-	// Note: We need to wrap r.Body, and since DecodeRequest takes *http.Request,
-	// we need to temporarily replace r.Body if we want to tee it.
+	var buf bytes.Buffer
 	if s.config.VerboseLogging {
-		var buf bytes.Buffer
 		tee := io.TeeReader(r.Body, &buf)
-		// We can't easily replace r.Body with a TeeReader because we need it to be a ReadCloser
-		// So we use NopCloser.
 		r.Body = io.NopCloser(tee)
 		defer func() {
-			log.Printf("Received request: %s", buf.String())
+			rest.Log().Debug().
+				Str("body", buf.String()).
+				Msg("request body")
 		}()
 	}
 	defer r.Body.Close()
@@ -98,6 +117,10 @@ func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 	// Pass the full request so headers/URL can be inspected if needed
 	providerReq, err := s.formatConverter.DecodeRequest(r)
 	if err != nil {
+		rest.Log().Warn().
+			Err(err).
+			Str("path", r.URL.Path).
+			Msg("failed to decode request")
 		http.Error(w, fmt.Sprintf("Failed to decode request: %v", err), http.StatusBadRequest)
 		return
 	}
@@ -111,7 +134,10 @@ func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 	// Normal request handling
 	universalReq, err := s.formatConverter.ConvertRequestFromFormat(providerReq)
 	if err != nil {
-		log.Printf("Error converting request: %v", err)
+		rest.Log().Warn().
+			Err(err).
+			Str("path", r.URL.Path).
+			Msg("failed to convert request from format")
 		http.Error(w, fmt.Sprintf("Failed to convert request: %v", err), http.StatusBadRequest)
 		return
 	}
@@ -123,7 +149,10 @@ func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 
 	if s.config.VerboseLogging {
 		reqJSON, _ := json.MarshalIndent(universalReq, "", "  ")
-		log.Printf("Universal request: %s", string(reqJSON))
+		rest.Log().Debug().
+			Str("model", originalModel).
+			Str("request", string(reqJSON)).
+			Msg("universal request")
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.config.Timeout)
@@ -131,39 +160,66 @@ func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 
 	universalResp, err := s.client.Generate(ctx, universalReq)
 	if err != nil {
-		log.Printf("Error calling provider: %v", err)
+		rest.Log().Error().
+			Err(err).
+			Str("model", originalModel).
+			Str("provider", string(s.config.TargetProvider)).
+			Msg("provider error")
 		http.Error(w, fmt.Sprintf("Provider error: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	if s.config.VerboseLogging {
 		respJSON, _ := json.MarshalIndent(universalResp, "", "  ")
-		log.Printf("Universal response: %s", string(respJSON))
+		rest.Log().Debug().
+			Str("model", originalModel).
+			Str("response", string(respJSON)).
+			Msg("universal response")
 	}
 
 	providerResp, err := s.formatConverter.ConvertResponseToFormat(universalResp, originalModel)
 	if err != nil {
-		log.Printf("Error converting response: %v", err)
+		rest.Log().Error().
+			Err(err).
+			Str("model", originalModel).
+			Msg("failed to convert response to format")
 		http.Error(w, fmt.Sprintf("Failed to convert response: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(providerResp); err != nil {
-		log.Printf("Error encoding response: %v", err)
+		rest.Log().Error().
+			Err(err).
+			Msg("failed to encode response")
 	}
 }
 
 // handleStream manages the streaming response lifecycle.
 func (s *ProxyServer) handleStream(w http.ResponseWriter, r *http.Request, providerReq any) {
+	startTime := time.Now()
+
+	rest.Log().Info().
+		Str("method", r.Method).
+		Str("path", r.URL.Path).
+		Str("remote_addr", r.RemoteAddr).
+		Msg("streaming request started")
+
 	streamingClient, ok := s.client.(ai.StreamingClient)
 	if !ok {
+		rest.Log().Warn().
+			Str("provider", string(s.config.TargetProvider)).
+			Msg("streaming not supported by target provider")
 		http.Error(w, "Streaming not supported by target provider", http.StatusNotImplemented)
 		return
 	}
 
 	universalReq, err := s.formatConverter.ConvertRequestFromFormat(providerReq)
 	if err != nil {
+		rest.Log().Warn().
+			Err(err).
+			Str("path", r.URL.Path).
+			Msg("failed to convert streaming request")
 		http.Error(w, fmt.Sprintf("Failed to convert request: %v", err), http.StatusBadRequest)
 		return
 	}
@@ -178,6 +234,11 @@ func (s *ProxyServer) handleStream(w http.ResponseWriter, r *http.Request, provi
 
 	stream, err := streamingClient.Stream(ctx, universalReq)
 	if err != nil {
+		rest.Log().Error().
+			Err(err).
+			Str("model", originalModel).
+			Str("provider", string(s.config.TargetProvider)).
+			Msg("provider stream error")
 		http.Error(w, fmt.Sprintf("Provider stream error: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -185,6 +246,8 @@ func (s *ProxyServer) handleStream(w http.ResponseWriter, r *http.Request, provi
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		rest.Log().Error().
+			Msg("streaming not supported by server")
 		http.Error(w, "Streaming not supported by server", http.StatusInternalServerError)
 		return
 	}
@@ -200,21 +263,37 @@ func (s *ProxyServer) handleStream(w http.ResponseWriter, r *http.Request, provi
 
 	handler.OnStart(w, flusher)
 
+	chunkCount := 0
 	for {
 		chunk, err := stream.Recv()
 		if err == io.EOF {
 			handler.OnEnd(w, flusher)
+			rest.Log().Info().
+				Str("method", r.Method).
+				Str("path", r.URL.Path).
+				Int("chunks", chunkCount).
+				Dur("duration", time.Since(startTime)).
+				Msg("streaming request completed")
 			return
 		}
 		if err != nil {
+			rest.Log().Error().
+				Err(err).
+				Int("chunks_sent", chunkCount).
+				Dur("duration", time.Since(startTime)).
+				Msg("streaming error")
 			handler.OnError(w, flusher, err)
 			return
 		}
 
 		if err := handler.OnChunk(w, flusher, chunk); err != nil {
-			log.Printf("Error formatting chunk: %v", err)
+			rest.Log().Error().
+				Err(err).
+				Int("chunks_sent", chunkCount).
+				Msg("error formatting chunk")
 			return
 		}
+		chunkCount++
 	}
 }
 
@@ -235,9 +314,14 @@ func (s *ProxyServer) Start() error {
 		w.Write([]byte("OK"))
 	})
 
-	log.Printf("Starting API proxy server on %s", s.config.ListenAddr)
-	log.Printf("API Format: %s (endpoint: %s)", s.config.APIFormat, endpoint)
-	log.Printf("Target Provider: %s", s.config.TargetProvider)
+	rest.Log().Info().
+		Str("listen_addr", s.config.ListenAddr).
+		Str("api_format", string(s.config.APIFormat)).
+		Str("endpoint", endpoint).
+		Str("target_provider", string(s.config.TargetProvider)).
+		Str("target_model", s.config.TargetModel).
+		Bool("verbose_logging", s.config.VerboseLogging).
+		Msg("starting API proxy server")
 
 	return http.ListenAndServe(s.config.ListenAddr, mux)
 }

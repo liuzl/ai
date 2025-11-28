@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"zliu.org/goutil/rest"
 )
 
 func main() {
@@ -24,16 +25,13 @@ func main() {
 	)
 	flag.Parse()
 
-	// Create logger
-	logger := NewLogger(os.Stdout)
-
 	// Load .env file if it exists
-	if err := loadEnvFile(*envFile, logger); err != nil {
+	if err := loadEnvFile(*envFile); err != nil {
 		log.Fatalf("Error loading environment file: %v", err)
 	}
 
 	// Load configuration
-	logger.InfoMsg(fmt.Sprintf("Loading configuration from %s", *configFile))
+	rest.Log().Info().Msgf("Loading configuration from %s", *configFile)
 	config, err := LoadConfig(*configFile)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
@@ -46,8 +44,8 @@ func main() {
 	}
 
 	// Create proxy server
-	logger.InfoMsg("Initializing proxy server...")
-	server, err := NewProxyServer(config, serverCfg, logger)
+	rest.Log().Info().Msg("Initializing proxy server...")
+	server, err := NewProxyServer(config, serverCfg)
 	if err != nil {
 		log.Fatalf("Failed to create proxy server: %v", err)
 	}
@@ -69,7 +67,7 @@ func main() {
 			log.Fatalf("Server error: %v", err)
 		}
 	case sig := <-stop:
-		logger.InfoMsg(fmt.Sprintf("Received signal: %v", sig))
+		rest.Log().Info().Msgf("Received signal: %v", sig)
 
 		// Create shutdown context with timeout
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -80,23 +78,23 @@ func main() {
 			log.Fatalf("Server shutdown error: %v", err)
 		}
 
-		logger.InfoMsg("Server stopped gracefully")
+		rest.Log().Info().Msg("Server stopped gracefully")
 	}
 }
 
 // loadEnvFile loads environment variables from a .env file
-func loadEnvFile(path string, logger *Logger) error {
+func loadEnvFile(path string) error {
 	// Try to load .env file
 	if err := godotenv.Load(path); err != nil {
 		// Check if file doesn't exist
 		if os.IsNotExist(err) {
-			logger.InfoMsg(fmt.Sprintf(".env file not found at %s, using system environment variables", path))
+			rest.Log().Info().Msgf(".env file not found at %s, using system environment variables", path)
 			return nil
 		}
 		// Other errors are fatal
 		return fmt.Errorf("failed to load .env file: %w", err)
 	}
 
-	logger.InfoMsg(fmt.Sprintf("Loaded environment variables from %s", path))
+	rest.Log().Info().Msgf("Loaded environment variables from %s", path)
 	return nil
 }

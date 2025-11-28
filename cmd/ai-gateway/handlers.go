@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/liuzl/ai"
+	"zliu.org/goutil/rest"
 )
 
 // handleOpenAI handles OpenAI format requests
@@ -113,30 +114,28 @@ func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request, form
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(providerResp); err != nil {
-		s.logger.Error(LogEntry{
-			RequestID: requestID,
-			Message:   "failed to encode response",
-			Error:     err.Error(),
-			Format:    string(format),
-			Model:     model,
-			Provider:  string(provider),
-		})
+		rest.Log().Error().
+			Str("request_id", requestID).
+			Err(err).
+			Str("format", string(format)).
+			Str("model", model).
+			Str("provider", string(provider)).
+			Msg("failed to encode response")
 		return
 	}
 
 	// Record metrics and log
 	duration := time.Since(startTime)
 	s.metrics.RecordRequest(string(format), model, string(provider), "success", duration)
-	s.logger.Info(LogEntry{
-		RequestID:  requestID,
-		Message:    "request completed successfully",
-		Duration:   float64(duration.Milliseconds()),
-		StatusCode: http.StatusOK,
-		Format:     string(format),
-		Model:      model,
-		Provider:   string(provider),
-		Streaming:  false,
-	})
+	rest.Log().Info().
+		Str("request_id", requestID).
+		Dur("duration", duration).
+		Int("status_code", http.StatusOK).
+		Str("format", string(format)).
+		Str("model", model).
+		Str("provider", string(provider)).
+		Bool("streaming", false).
+		Msg("request completed successfully")
 }
 
 // handleStream handles streaming requests
@@ -199,14 +198,13 @@ func (s *ProxyServer) handleStream(
 		chunk, err := streamReader.Recv()
 		if err != nil {
 			streamHandler.OnError(w, flusher, err)
-			s.logger.Error(LogEntry{
-				RequestID: requestID,
-				Message:   "streaming error",
-				Error:     err.Error(),
-				Format:    string(format),
-				Model:     model,
-				Provider:  provider,
-			})
+			rest.Log().Error().
+				Str("request_id", requestID).
+				Err(err).
+				Str("format", string(format)).
+				Str("model", model).
+				Str("provider", provider).
+				Msg("streaming error")
 			break
 		}
 
@@ -217,14 +215,13 @@ func (s *ProxyServer) handleStream(
 
 		if err := streamHandler.OnChunk(w, flusher, chunk); err != nil {
 			streamHandler.OnError(w, flusher, err)
-			s.logger.Error(LogEntry{
-				RequestID: requestID,
-				Message:   "failed to write chunk",
-				Error:     err.Error(),
-				Format:    string(format),
-				Model:     model,
-				Provider:  provider,
-			})
+			rest.Log().Error().
+				Str("request_id", requestID).
+				Err(err).
+				Str("format", string(format)).
+				Str("model", model).
+				Str("provider", provider).
+				Msg("failed to write chunk")
 			break
 		}
 	}
@@ -232,16 +229,15 @@ func (s *ProxyServer) handleStream(
 	// Record metrics and log
 	duration := time.Since(startTime)
 	s.metrics.RecordRequest(string(format), model, provider, "success", duration)
-	s.logger.Info(LogEntry{
-		RequestID:  requestID,
-		Message:    "streaming request completed",
-		Duration:   float64(duration.Milliseconds()),
-		StatusCode: http.StatusOK,
-		Format:     string(format),
-		Model:      model,
-		Provider:   provider,
-		Streaming:  true,
-	})
+	rest.Log().Info().
+		Str("request_id", requestID).
+		Dur("duration", duration).
+		Int("status_code", http.StatusOK).
+		Str("format", string(format)).
+		Str("model", model).
+		Str("provider", provider).
+		Bool("streaming", true).
+		Msg("streaming request completed")
 }
 
 // handleError handles error responses
@@ -263,15 +259,15 @@ func (s *ProxyServer) handleError(
 	s.metrics.RecordError(string(format), model, provider, errorType)
 
 	// Log error
-	s.logger.Error(LogEntry{
-		RequestID:  requestID,
-		Message:    "request failed",
-		Error:      err.Error(),
-		StatusCode: statusCode,
-		Format:     string(format),
-		Model:      model,
-		Provider:   provider,
-	})
+	rest.Log().Error().
+		Str("request_id", requestID).
+		Err(err).
+		Int("status_code", statusCode).
+		Str("format", string(format)).
+		Str("model", model).
+		Str("provider", provider).
+		Str("error_type", errorType).
+		Msg("request failed")
 
 	// Write error response
 	w.Header().Set("Content-Type", "application/json")

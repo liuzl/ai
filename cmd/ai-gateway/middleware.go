@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"runtime/debug"
 	"time"
+
+	"zliu.org/goutil/rest"
 )
 
 // RequestIDMiddleware adds a request ID to each request
@@ -29,7 +31,7 @@ func RequestIDMiddleware(next http.Handler) http.Handler {
 }
 
 // LoggingMiddleware logs HTTP requests and responses
-func LoggingMiddleware(logger *Logger) func(http.Handler) http.Handler {
+func LoggingMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			startTime := time.Now()
@@ -39,28 +41,28 @@ func LoggingMiddleware(logger *Logger) func(http.Handler) http.Handler {
 			rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
 			// Log request
-			logger.Info(LogEntry{
-				RequestID: requestID,
-				Message:   fmt.Sprintf("%s %s", r.Method, r.URL.Path),
-			})
+			rest.Log().Info().
+				Str("request_id", requestID).
+				Str("method", r.Method).
+				Str("path", r.URL.Path).
+				Msg("request started")
 
 			// Call next handler
 			next.ServeHTTP(rw, r)
 
 			// Log response
 			duration := time.Since(startTime)
-			logger.Info(LogEntry{
-				RequestID:  requestID,
-				Message:    "request completed",
-				Duration:   float64(duration.Milliseconds()),
-				StatusCode: rw.statusCode,
-			})
+			rest.Log().Info().
+				Str("request_id", requestID).
+				Dur("duration", duration).
+				Int("status_code", rw.statusCode).
+				Msg("request completed")
 		})
 	}
 }
 
 // RecoveryMiddleware recovers from panics and logs them
-func RecoveryMiddleware(logger *Logger) func(http.Handler) http.Handler {
+func RecoveryMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
@@ -68,14 +70,11 @@ func RecoveryMiddleware(logger *Logger) func(http.Handler) http.Handler {
 					requestID := GetRequestID(r.Context())
 
 					// Log the panic
-					logger.Error(LogEntry{
-						RequestID: requestID,
-						Message:   "panic recovered",
-						Error:     fmt.Sprintf("%v", err),
-						Extra: map[string]interface{}{
-							"stack": string(debug.Stack()),
-						},
-					})
+					rest.Log().Error().
+						Str("request_id", requestID).
+						Str("error", fmt.Sprintf("%v", err)).
+						Str("stack", string(debug.Stack())).
+						Msg("panic recovered")
 
 					// Return 500 error
 					w.Header().Set("Content-Type", "application/json")
