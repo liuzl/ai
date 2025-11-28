@@ -11,7 +11,7 @@
 
 # Test binary, built with `go test -c`
 *.test
-
+/ai-gateway
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
@@ -19,6 +19,9 @@ coverage.*
 profile.cov
 
 *.log
+zerolog
+
+.cache/
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
