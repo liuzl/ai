@@ -136,7 +136,7 @@ func (s *ProxyServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":    "healthy",
 		"models":    len(s.config.Models),
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -151,8 +151,7 @@ func (s *ProxyServer) validateProviders() error {
 
 	for _, provider := range providers {
 		// Try to create a client for each provider
-		_, err := s.clientPool.GetClient(provider)
-		if err != nil {
+		if _, err := s.clientPool.GetClient(provider); err != nil {
 			return fmt.Errorf("failed to initialize provider %s: %w", provider, err)
 		}
 	}

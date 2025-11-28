@@ -80,7 +80,7 @@ func RecoveryMiddleware() func(http.Handler) http.Handler {
 					w.Header().Set("Content-Type", "application/json")
 					w.Header().Set("X-Request-ID", requestID)
 					w.WriteHeader(http.StatusInternalServerError)
-					w.Write([]byte(fmt.Sprintf(`{"error":{"message":"Internal server error","request_id":"%s"}}`, requestID)))
+					w.Write(fmt.Appendf(nil, `{"error":{"message":"Internal server error","request_id":"%s"}}`, requestID))
 				}
 			}()
 

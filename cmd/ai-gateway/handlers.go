@@ -283,8 +283,8 @@ func (s *ProxyServer) handleError(
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
-	errorResponse := map[string]interface{}{
-		"error": map[string]interface{}{
+	errorResponse := map[string]any{
+		"error": map[string]any{
 			"message":    err.Error(),
 			"type":       errorType,
 			"request_id": requestID,
