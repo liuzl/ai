@@ -253,6 +253,7 @@ type AnthropicStreamHandler struct {
 	TextIndex      *int
 	NextIndex      int
 	ToolIndex      map[string]int
+	SentStop       bool
 }
 
 func (h *AnthropicStreamHandler) OnStart(w http.ResponseWriter, flusher http.Flusher) {}
@@ -335,18 +336,38 @@ func (h *AnthropicStreamHandler) OnChunk(w http.ResponseWriter, flusher http.Flu
 	}
 
 	if chunk.Done {
+		if h.TextIndex != nil {
+			sendAnthropicEvent(w, flusher, "content_block_stop", map[string]any{
+				"type":  "content_block_stop",
+				"index": *h.TextIndex,
+			})
+		}
 		sendAnthropicEvent(w, flusher, "message_delta", map[string]any{
 			"type":  "message_delta",
 			"delta": map[string]any{"stop_reason": "end_turn"},
 		})
 		sendAnthropicEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
+		h.SentStop = true
 	}
 	return nil
 }
 
 func (h *AnthropicStreamHandler) OnEnd(w http.ResponseWriter, flusher http.Flusher) {
-	// Already handled in OnChunk when chunk.Done is true, but for safety in case of unexpected EOF:
-	// In a robust implementation we might track if we sent stop.
+	if !h.MessageStarted || h.SentStop {
+		return
+	}
+	if h.TextIndex != nil {
+		sendAnthropicEvent(w, flusher, "content_block_stop", map[string]any{
+			"type":  "content_block_stop",
+			"index": *h.TextIndex,
+		})
+	}
+	sendAnthropicEvent(w, flusher, "message_delta", map[string]any{
+		"type":  "message_delta",
+		"delta": map[string]any{"stop_reason": "end_turn"},
+	})
+	sendAnthropicEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
+	h.SentStop = true
 }
 
 func (h *AnthropicStreamHandler) OnError(w http.ResponseWriter, flusher http.Flusher, err error) {

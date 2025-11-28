@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -197,6 +199,10 @@ func (s *ProxyServer) handleStream(
 	for {
 		chunk, err := streamReader.Recv()
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				streamHandler.OnEnd(w, flusher)
+				break
+			}
 			streamHandler.OnError(w, flusher, err)
 			rest.Log().Error().
 				Str("request_id", requestID).

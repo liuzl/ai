@@ -219,6 +219,10 @@ func (a *openaiAdapter) parseStreamEvent(event *sseEvent, acc *streamAccumulator
 		return chunk, true, nil
 	}
 
+	if chunk.TextDelta == "" && len(chunk.ToolCallDeltas) == 0 && !chunk.Done {
+		return nil, false, nil
+	}
+
 	return chunk, false, nil
 }
 
