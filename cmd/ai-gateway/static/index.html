@@ -211,6 +211,31 @@
             background: rgba(255,255,255,0.2);
         }
 
+        .message-meta {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .meta-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            background: rgba(102, 126, 234, 0.1);
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+
+        .meta-label {
+            opacity: 0.7;
+        }
+
         .typing-indicator {
             display: flex;
             gap: 0.4rem;
@@ -448,7 +473,7 @@
             }
         }
 
-        function addMessage(role, content) {
+        function addMessage(role, content, metadata = null) {
             const chatContainer = document.getElementById('chatContainer');
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${role}`;
@@ -460,12 +485,34 @@
             const contentDiv = document.createElement('div');
             contentDiv.className = 'message-content';
 
+            let textContentDiv = contentDiv;
+
+            // Add metadata for assistant messages
+            if (role === 'assistant' && metadata) {
+                const metaDiv = document.createElement('div');
+                metaDiv.className = 'message-meta';
+                metaDiv.innerHTML = `
+                    <span class="meta-badge">
+                        <span class="meta-label">Format:</span> ${metadata.format}
+                    </span>
+                    <span class="meta-badge">
+                        <span class="meta-label">Model:</span> ${metadata.model}
+                    </span>
+                `;
+                contentDiv.appendChild(metaDiv);
+
+                // Create separate div for text content
+                textContentDiv = document.createElement('div');
+                textContentDiv.className = 'message-text';
+                contentDiv.appendChild(textContentDiv);
+            }
+
             if (role === 'assistant') {
                 // Render markdown for assistant messages
                 const html = marked.parse(content);
-                contentDiv.innerHTML = DOMPurify.sanitize(html);
+                textContentDiv.innerHTML = DOMPurify.sanitize(html);
             } else {
-                contentDiv.textContent = content;
+                textContentDiv.textContent = content;
             }
 
             messageDiv.appendChild(avatar);
@@ -474,7 +521,7 @@
 
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
-            return contentDiv;
+            return textContentDiv;
         }
 
         function showTypingIndicator() {
@@ -632,9 +679,14 @@
                                 assistantMessage += content;
 
                                 if (!contentDiv) {
-                                    contentDiv = addMessage('assistant', '');
+                                    // Create message with metadata on first chunk
+                                    contentDiv = addMessage('assistant', '', {
+                                        format: format.charAt(0).toUpperCase() + format.slice(1),
+                                        model: model
+                                    });
                                 }
 
+                                // Update the content
                                 const html = marked.parse(assistantMessage);
                                 contentDiv.innerHTML = DOMPurify.sanitize(html);
                             }
