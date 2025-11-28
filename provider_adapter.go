@@ -35,6 +35,13 @@ type streamingAdapter interface {
 	parseStreamEvent(event *sseEvent, acc *streamAccumulator) (*StreamChunk, bool, error)
 	// getStreamEndpoint returns the endpoint for streaming (may match getEndpoint).
 	getStreamEndpoint(model string) string
+	// newStreamDecoder creates the appropriate decoder for this provider's streaming format.
+	newStreamDecoder(r io.Reader) streamDecoder
+}
+
+// streamDecoder abstracts different streaming formats (SSE, JSON array, etc.)
+type streamDecoder interface {
+	Next() (*sseEvent, error)
 }
 
 // genericClient handles the common logic for making AI requests, delegating
@@ -99,7 +106,8 @@ func (c *genericClient) Stream(ctx context.Context, req *Request) (StreamReader,
 		return nil, err
 	}
 
-	decoder := newSSEDecoder(body)
+	// Let the adapter choose the appropriate decoder for its streaming format
+	decoder := streaming.newStreamDecoder(body)
 	reader := &genericStreamReader{
 		body:    body,
 		decoder: decoder,
@@ -188,7 +196,7 @@ func (a *streamAccumulator) snapshot() *Response {
 // genericStreamReader implements StreamReader over SSE events.
 type genericStreamReader struct {
 	body    io.Closer
-	decoder *sseDecoder
+	decoder streamDecoder
 	adapter streamingAdapter
 	acc     *streamAccumulator
 	closed  bool

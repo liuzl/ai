@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -228,6 +229,10 @@ func (a *openaiAdapter) parseStreamEvent(event *sseEvent, acc *streamAccumulator
 
 func (a *openaiAdapter) getStreamEndpoint(model string) string {
 	return a.getEndpoint(model)
+}
+
+func (a *openaiAdapter) newStreamDecoder(r io.Reader) streamDecoder {
+	return newSSEDecoder(r)
 }
 
 // --- OpenAI Specific Types ---

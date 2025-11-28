@@ -2,14 +2,19 @@ package main
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"time"
 
 	"github.com/liuzl/ai"
 	"zliu.org/goutil/rest"
 )
+
+//go:embed static
+var staticFiles embed.FS
 
 // ServerConfig holds server configuration
 type ServerConfig struct {
@@ -84,6 +89,15 @@ func (s *ProxyServer) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/anthropic/v1/messages", s.handleAnthropic)
 	mux.HandleFunc("/gemini/v1/models/", s.handleGemini)
 	mux.HandleFunc("/gemini/v1beta/models/", s.handleGemini)
+
+	// Embedded UI - serve at root path
+	fsys, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		rest.Log().Warn().Err(err).Msg("failed to load embedded UI")
+	} else {
+		mux.Handle("/", http.FileServer(http.FS(fsys)))
+		rest.Log().Info().Msg("embedded UI enabled at /")
+	}
 
 	return mux
 }

@@ -269,10 +269,7 @@ func buildOpenAIStreamChunk(id, model string, chunk *StreamChunk) *openAIStreamC
 		Delta: openAIStreamDelta{},
 	}
 	if chunk.TextDelta != "" {
-		choice.Delta.Content = append(choice.Delta.Content, openAIContentPart{
-			Type: "text",
-			Text: chunk.TextDelta,
-		})
+		choice.Delta.Content = chunk.TextDelta
 	}
 	for _, tc := range chunk.ToolCallDeltas {
 		choice.Delta.ToolCalls = append(choice.Delta.ToolCalls, openAIToolCallDelta{
@@ -319,13 +316,8 @@ type openAIStreamChoice struct {
 
 type openAIStreamDelta struct {
 	Role      string                `json:"role,omitempty"`
-	Content   []openAIContentPart   `json:"content,omitempty"`
+	Content   string                `json:"content,omitempty"`
 	ToolCalls []openAIToolCallDelta `json:"tool_calls,omitempty"`
-}
-
-type openAIContentPart struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
 }
 
 type openAIToolCallDelta struct {

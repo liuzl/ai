@@ -192,6 +192,11 @@ func (s *ProxyServer) handleStream(
 		return
 	}
 
+	// Set SSE headers to ensure proper streaming behavior
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
 	// Start streaming
 	streamHandler.OnStart(w, flusher)
 
@@ -214,11 +219,6 @@ func (s *ProxyServer) handleStream(
 			break
 		}
 
-		if chunk.Done {
-			streamHandler.OnEnd(w, flusher)
-			break
-		}
-
 		if err := streamHandler.OnChunk(w, flusher, chunk); err != nil {
 			streamHandler.OnError(w, flusher, err)
 			rest.Log().Error().
@@ -228,6 +228,10 @@ func (s *ProxyServer) handleStream(
 				Str("model", model).
 				Str("provider", provider).
 				Msg("failed to write chunk")
+			break
+		}
+
+		if chunk.Done {
 			break
 		}
 	}

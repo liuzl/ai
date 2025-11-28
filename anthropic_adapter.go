@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -344,6 +345,10 @@ func (a *anthropicAdapter) parseStreamEvent(event *sseEvent, acc *streamAccumula
 
 func (a *anthropicAdapter) getStreamEndpoint(model string) string {
 	return a.getEndpoint(model)
+}
+
+func (a *anthropicAdapter) newStreamDecoder(r io.Reader) streamDecoder {
+	return newSSEDecoder(r)
 }
 
 // --- Private Anthropic Specific Types ---

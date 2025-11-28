@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 )
@@ -26,6 +27,11 @@ func (a *geminiAdapter) getEndpoint(model string) string {
 
 func (a *geminiAdapter) getStreamEndpoint(model string) string {
 	return fmt.Sprintf("/models/%s:streamGenerateContent", model)
+}
+
+func (a *geminiAdapter) newStreamDecoder(r io.Reader) streamDecoder {
+	// Gemini uses JSON array format: [{obj1},{obj2},{obj3}]
+	return newJSONArrayDecoder(r)
 }
 
 func (a *geminiAdapter) buildRequestPayload(ctx context.Context, req *Request) (any, error) {
@@ -303,6 +309,11 @@ func (a *geminiAdapter) buildRequestPayload(ctx context.Context, req *Request) (
 		}
 	}
 
+	// Set generation config with reasonable defaults
+	geminiReq.GenerationConfig = &geminiGenConfig{
+		MaxOutputTokens: 8192, // Set a reasonable default
+	}
+
 	return geminiReq, nil
 }
 
@@ -427,9 +438,14 @@ func (a *geminiAdapter) parseStreamEvent(event *sseEvent, acc *streamAccumulator
 // (These are the same structs from the original client_gemini.go)
 
 type geminiGenerateContentRequest struct {
-	Contents          []geminiContent `json:"contents"`
-	Tools             []geminiTool    `json:"tools,omitempty"`
-	SystemInstruction *geminiContent  `json:"systemInstruction,omitempty"`
+	Contents          []geminiContent  `json:"contents"`
+	Tools             []geminiTool     `json:"tools,omitempty"`
+	SystemInstruction *geminiContent   `json:"systemInstruction,omitempty"`
+	GenerationConfig  *geminiGenConfig `json:"generationConfig,omitempty"`
+}
+
+type geminiGenConfig struct {
+	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
 }
 
 type geminiContent struct {

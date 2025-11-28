@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Gateway - Chat</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #667eea;
+            --primary-dark: #5568d3;
+            --secondary: #764ba2;
+            --background: #f7f8fc;
+            --surface: #ffffff;
+            --border: #e1e4e8;
+            --text: #24292e;
+            --text-secondary: #586069;
+            --user-msg: #667eea;
+            --assistant-msg: #f6f8fa;
+            --shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: var(--background);
+            color: var(--text);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        header {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            padding: 1rem 1.5rem;
+            box-shadow: var(--shadow);
+            z-index: 10;
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        select, button {
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            border: none;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        select {
+            background: white;
+            color: var(--text);
+            font-weight: 500;
+        }
+
+        select:hover {
+            background: #f6f8fa;
+        }
+
+        .btn-clear {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            font-weight: 500;
+        }
+
+        .btn-clear:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        /* Chat Area */
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .message {
+            display: flex;
+            gap: 1rem;
+            max-width: 85%;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .user .message-avatar {
+            background: var(--user-msg);
+            color: white;
+        }
+
+        .assistant .message-avatar {
+            background: var(--secondary);
+            color: white;
+        }
+
+        .message-content {
+            background: var(--surface);
+            padding: 1rem 1.25rem;
+            border-radius: 16px;
+            box-shadow: var(--shadow);
+            word-wrap: break-word;
+        }
+
+        .user .message-content {
+            background: var(--user-msg);
+            color: white;
+        }
+
+        .assistant .message-content {
+            background: var(--assistant-msg);
+        }
+
+        .message-content p {
+            margin-bottom: 0.75rem;
+            line-height: 1.6;
+        }
+
+        .message-content p:last-child {
+            margin-bottom: 0;
+        }
+
+        .message-content pre {
+            background: #1f2937;
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 0.5rem 0;
+        }
+
+        .message-content code {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .message-content pre code {
+            background: transparent;
+            padding: 0;
+        }
+
+        .message-content :not(pre) > code {
+            background: rgba(0,0,0,0.05);
+            padding: 0.2em 0.4em;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .user .message-content :not(pre) > code {
+            background: rgba(255,255,255,0.2);
+        }
+
+        .typing-indicator {
+            display: flex;
+            gap: 0.4rem;
+            padding: 1rem;
+        }
+
+        .typing-indicator span {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--primary);
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% {
+                opacity: 0.3;
+                transform: translateY(0);
+            }
+            30% {
+                opacity: 1;
+                transform: translateY(-10px);
+            }
+        }
+
+        /* Input Area */
+        .input-container {
+            background: var(--surface);
+            padding: 1.5rem;
+            box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 1rem;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        #messageInput {
+            flex: 1;
+            padding: 1rem 1.25rem;
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            font-size: 1rem;
+            font-family: inherit;
+            resize: vertical;
+            min-height: 50px;
+            max-height: 150px;
+            transition: border-color 0.2s;
+        }
+
+        #messageInput:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        #sendBtn {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 1rem;
+            transition: transform 0.2s;
+        }
+
+        #sendBtn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        #sendBtn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .error {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c33;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .controls {
+                justify-content: space-between;
+            }
+
+            .message {
+                max-width: 95%;
+            }
+
+            select, button {
+                padding: 0.4rem 0.8rem;
+                font-size: 0.85rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <h1>🤖 AI Gateway Chat</h1>
+                <div class="controls">
+                    <select id="formatSelect">
+                        <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic</option>
+                        <option value="gemini">Gemini</option>
+                    </select>
+                    <select id="modelSelect">
+                        <option value="">Loading models...</option>
+                    </select>
+                    <button class="btn-clear" onclick="clearChat()">Clear Chat</button>
+                </div>
+            </div>
+        </header>
+
+        <div id="chatContainer" class="chat-container">
+            <div class="message assistant">
+                <div class="message-avatar">AI</div>
+                <div class="message-content">
+                    <p>👋 Welcome to AI Gateway! I can help you interact with multiple AI models.</p>
+                    <p>Select a format and model above, then start chatting.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-container">
+            <div class="input-wrapper">
+                <textarea
+                    id="messageInput"
+                    placeholder="Type your message here... (Shift+Enter for new line)"
+                    onkeydown="handleKeyPress(event)"
+                ></textarea>
+                <button id="sendBtn" onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_ENDPOINTS = {
+            openai: '/openai/v1/chat/completions',
+            anthropic: '/anthropic/v1/messages',
+            gemini: '/gemini/v1/models/{model}:streamGenerateContent'
+        };
+
+        // Model configurations from ai-gateway
+        const MODELS = {
+            openai: [
+                'gpt-5.1',
+                'gpt-5.1-codex',
+                'gpt-5.1-codex-mini'
+            ],
+            anthropic: [
+                'glm-4.6'
+            ],
+            gemini: [
+                'gemini-3-pro-preview',
+                'gemini-2.5-pro',
+                'gemini-2.5-flash',
+                'gemini-2.5-flash-lite',
+                'gemini-2.0-flash'
+            ]
+        };
+
+        let messages = [];
+        let isStreaming = false;
+
+        // Configure marked for markdown rendering
+        marked.setOptions({
+            highlight: function(code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    return hljs.highlight(code, { language: lang }).value;
+                }
+                return hljs.highlightAuto(code).value;
+            },
+            breaks: true,
+            gfm: true
+        });
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            updateModelList();
+            document.getElementById('formatSelect').addEventListener('change', updateModelList);
+        });
+
+        function updateModelList() {
+            const format = document.getElementById('formatSelect').value;
+            const modelSelect = document.getElementById('modelSelect');
+            const models = MODELS[format] || [];
+
+            modelSelect.innerHTML = models.map(model =>
+                `<option value="${model}">${model}</option>`
+            ).join('');
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function clearChat() {
+            if (confirm('Clear all messages?')) {
+                messages = [];
+                const chatContainer = document.getElementById('chatContainer');
+                chatContainer.innerHTML = `
+                    <div class="message assistant">
+                        <div class="message-avatar">AI</div>
+                        <div class="message-content">
+                            <p>Chat cleared. Ready for a new conversation!</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function addMessage(role, content) {
+            const chatContainer = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            avatar.textContent = role === 'user' ? 'You' : 'AI';
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+
+            if (role === 'assistant') {
+                // Render markdown for assistant messages
+                const html = marked.parse(content);
+                contentDiv.innerHTML = DOMPurify.sanitize(html);
+            } else {
+                contentDiv.textContent = content;
+            }
+
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(contentDiv);
+            chatContainer.appendChild(messageDiv);
+
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            return contentDiv;
+        }
+
+        function showTypingIndicator() {
+            const chatContainer = document.getElementById('chatContainer');
+            const indicator = document.createElement('div');
+            indicator.className = 'message assistant';
+            indicator.id = 'typingIndicator';
+            indicator.innerHTML = `
+                <div class="message-avatar">AI</div>
+                <div class="message-content">
+                    <div class="typing-indicator">
+                        <span></span><span></span><span></span>
+                    </div>
+                </div>
+            `;
+            chatContainer.appendChild(indicator);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function hideTypingIndicator() {
+            const indicator = document.getElementById('typingIndicator');
+            if (indicator) {
+                indicator.remove();
+            }
+        }
+
+        function showError(message) {
+            const chatContainer = document.getElementById('chatContainer');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error';
+            errorDiv.textContent = `Error: ${message}`;
+            chatContainer.appendChild(errorDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const message = input.value.trim();
+
+            if (!message || isStreaming) return;
+
+            const format = document.getElementById('formatSelect').value;
+            const model = document.getElementById('modelSelect').value;
+
+            if (!model) {
+                showError('Please select a model');
+                return;
+            }
+
+            // Add user message
+            addMessage('user', message);
+            messages.push({ role: 'user', content: message });
+
+            // Clear input
+            input.value = '';
+            input.style.height = 'auto';
+
+            // Disable input
+            isStreaming = true;
+            sendBtn.disabled = true;
+
+            showTypingIndicator();
+
+            try {
+                await streamResponse(format, model, messages);
+            } catch (error) {
+                hideTypingIndicator();
+                showError(error.message);
+            } finally {
+                isStreaming = false;
+                sendBtn.disabled = false;
+                input.focus();
+            }
+        }
+
+        async function streamResponse(format, model, messages) {
+            let endpoint = API_ENDPOINTS[format];
+            let requestBody;
+
+            // Format-specific request construction
+            if (format === 'openai') {
+                requestBody = {
+                    model: model,
+                    messages: messages,
+                    stream: true
+                };
+            } else if (format === 'anthropic') {
+                requestBody = {
+                    model: model,
+                    messages: messages,
+                    max_tokens: 4096,
+                    stream: true
+                };
+            } else if (format === 'gemini') {
+                endpoint = endpoint.replace('{model}', model);
+                // Gemini format
+                const contents = messages.map(msg => ({
+                    role: msg.role === 'assistant' ? 'model' : 'user',
+                    parts: [{ text: msg.content }]
+                }));
+                requestBody = { contents };
+            }
+
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            hideTypingIndicator();
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let assistantMessage = '';
+            let contentDiv = null;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n').filter(line => line.trim());
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6);
+                        if (data === '[DONE]') continue;
+
+                        try {
+                            const parsed = JSON.parse(data);
+                            let content = '';
+
+                            // Extract content based on format
+                            if (format === 'openai') {
+                                content = parsed.choices?.[0]?.delta?.content || '';
+                            } else if (format === 'anthropic') {
+                                if (parsed.type === 'content_block_delta') {
+                                    content = parsed.delta?.text || '';
+                                }
+                            } else if (format === 'gemini') {
+                                content = parsed.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                            }
+
+                            if (content) {
+                                assistantMessage += content;
+
+                                if (!contentDiv) {
+                                    contentDiv = addMessage('assistant', '');
+                                }
+
+                                const html = marked.parse(assistantMessage);
+                                contentDiv.innerHTML = DOMPurify.sanitize(html);
+                            }
+                        } catch (e) {
+                            console.error('Parse error:', e);
+                        }
+                    }
+                }
+            }
+
+            if (assistantMessage) {
+                messages.push({ role: 'assistant', content: assistantMessage });
+            }
+        }
+    </script>
+</body>
+</html>
