@@ -333,12 +333,12 @@
             <div class="header-content">
                 <h1>🤖 AI Gateway Chat</h1>
                 <div class="controls">
-                    <select id="formatSelect">
-                        <option value="openai">OpenAI</option>
-                        <option value="anthropic">Anthropic</option>
-                        <option value="gemini">Gemini</option>
+                    <select id="formatSelect" title="API Format: Choose the request format">
+                        <option value="openai">Format: OpenAI</option>
+                        <option value="anthropic">Format: Anthropic</option>
+                        <option value="gemini">Format: Gemini</option>
                     </select>
-                    <select id="modelSelect">
+                    <select id="modelSelect" title="Model: Choose the target model">
                         <option value="">Loading models...</option>
                     </select>
                     <button class="btn-clear" onclick="clearChat()">Clear Chat</button>
@@ -350,8 +350,10 @@
             <div class="message assistant">
                 <div class="message-avatar">AI</div>
                 <div class="message-content">
-                    <p>👋 Welcome to AI Gateway! I can help you interact with multiple AI models.</p>
-                    <p>Select a format and model above, then start chatting.</p>
+                    <p>👋 Welcome to AI Gateway! Universal format converter for multiple AI models.</p>
+                    <p><strong>Format:</strong> Choose your preferred API format (OpenAI, Anthropic, or Gemini).</p>
+                    <p><strong>Model:</strong> Select any model - the gateway converts your request format and routes to the appropriate provider.</p>
+                    <p><em>Example: Use Gemini format to call GLM-4.6 (Anthropic backend) - the gateway handles the conversion!</em></p>
                 </div>
             </div>
         </div>
@@ -377,23 +379,20 @@
         };
 
         // Model configurations from ai-gateway
-        const MODELS = {
-            openai: [
-                'gpt-5.1',
-                'gpt-5.1-codex',
-                'gpt-5.1-codex-mini'
-            ],
-            anthropic: [
-                'glm-4.6'
-            ],
-            gemini: [
-                'gemini-3-pro-preview',
-                'gemini-2.5-pro',
-                'gemini-2.5-flash',
-                'gemini-2.5-flash-lite',
-                'gemini-2.0-flash'
-            ]
-        };
+        // Models are now decoupled from API formats
+        // Each model has a name and provider (for routing)
+        // Users can choose any API format to interact with any model
+        const MODELS = [
+            { name: 'gpt-5.1', provider: 'openai', displayName: 'GPT-5.1 (OpenAI)' },
+            { name: 'gpt-5.1-codex', provider: 'openai', displayName: 'GPT-5.1 Codex (OpenAI)' },
+            { name: 'gpt-5.1-codex-mini', provider: 'openai', displayName: 'GPT-5.1 Codex Mini (OpenAI)' },
+            { name: 'glm-4.6', provider: 'anthropic', displayName: 'GLM-4.6 (via Anthropic API)' },
+            { name: 'gemini-3-pro-preview', provider: 'gemini', displayName: 'Gemini 3 Pro Preview' },
+            { name: 'gemini-2.5-pro', provider: 'gemini', displayName: 'Gemini 2.5 Pro' },
+            { name: 'gemini-2.5-flash', provider: 'gemini', displayName: 'Gemini 2.5 Flash' },
+            { name: 'gemini-2.5-flash-lite', provider: 'gemini', displayName: 'Gemini 2.5 Flash Lite' },
+            { name: 'gemini-2.0-flash', provider: 'gemini', displayName: 'Gemini 2.0 Flash' }
+        ];
 
         let messages = [];
         let isStreaming = false;
@@ -413,16 +412,17 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             updateModelList();
-            document.getElementById('formatSelect').addEventListener('change', updateModelList);
+            // Format change no longer affects model list (decoupled)
+            // Format only determines the API request structure
         });
 
         function updateModelList() {
-            const format = document.getElementById('formatSelect').value;
             const modelSelect = document.getElementById('modelSelect');
-            const models = MODELS[format] || [];
 
-            modelSelect.innerHTML = models.map(model =>
-                `<option value="${model}">${model}</option>`
+            // Display all models regardless of selected format
+            // Format determines the API request structure, not available models
+            modelSelect.innerHTML = MODELS.map(model =>
+                `<option value="${model.name}" data-provider="${model.provider}">${model.displayName}</option>`
             ).join('');
         }
 
@@ -552,10 +552,13 @@
         }
 
         async function streamResponse(format, model, messages) {
+            // Use format to determine both endpoint and request body structure
+            // Backend gateway will handle routing to the correct provider based on model name
             let endpoint = API_ENDPOINTS[format];
             let requestBody;
 
             // Format-specific request construction
+            // Gateway accepts any format and routes to appropriate provider
             if (format === 'openai') {
                 requestBody = {
                     model: model,
