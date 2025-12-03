@@ -12,6 +12,7 @@ It also features built-in support for the [Model-Context Protocol (MCP)](https:/
 - **Multimodal Support**: Support for text, images, audio, video, and PDF documents with automatic format handling.
 - **First-Class Tool Support**: Abstracted support for function calling (tools) that works across providers.
 - **MCP Integration**: Discover, connect to, and execute tools on MCP-compliant servers.
+- **AI Gateway**: Production-ready HTTP gateway (in `cmd/ai-gateway`) that accepts OpenAI, Gemini, or Anthropic request formats and routes to configured providers with streaming, metrics, and health checks.
 - **Error Handling**: Clear error messages when using unsupported features with specific providers.
 
 ## Installation
@@ -333,6 +334,51 @@ See the `examples` directory for complete working examples:
 - **[examples/tool_server_interaction](examples/tool_server_interaction)** - MCP tool integration
 
 Each example includes detailed documentation on supported formats, use cases, and limitations.
+
+## AI Gateway
+
+`cmd/ai-gateway` is a production-ready gateway that lets you send OpenAI, Gemini, or Anthropic formatted requests and routes them to the provider you configure per model. It supports streaming responses, Prometheus metrics at `/metrics`, health checks at `/health`, structured JSON logs with request IDs, and YAML-based routing.
+
+### Quick Start
+
+```bash
+# Install (or build from source in cmd/ai-gateway)
+go install github.com/liuzl/ai/cmd/ai-gateway@latest
+
+# Set credentials (or use an .env file)
+export OPENAI_API_KEY=sk-openai
+export GEMINI_API_KEY=AIza-gemini
+export ANTHROPIC_API_KEY=sk-anthropic
+
+# Configure model routing
+cat > config/proxy-config.yaml <<'EOF'
+version: "1.0"
+models:
+  - name: "gpt-4o-mini"
+    provider: "openai"
+  - name: "claude-3-5-sonnet-20241022"
+    provider: "anthropic"
+  - name: "gemini-2.0-flash-exp"
+    provider: "gemini"
+EOF
+
+# Start the gateway (defaults to :8080)
+ai-gateway -config config/proxy-config.yaml
+```
+
+Send requests in any supported format; the gateway forwards to the configured provider for that model:
+
+```bash
+curl -X POST http://localhost:8080/openai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemini-2.0-flash-exp",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": true
+  }'
+```
+
+See `cmd/ai-gateway/README.md` for full configuration, deployment, and observability details.
 
 ## License
 
