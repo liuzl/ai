@@ -59,12 +59,17 @@ func (a *geminiAdapter) buildRequestPayload(ctx context.Context, req *Request) (
 	if len(req.Tools) > 0 {
 		geminiReq.Tools = make([]geminiTool, len(req.Tools))
 		for i, t := range req.Tools {
+			// Clean parameters to remove fields not supported by Gemini
+			cleanedParams, err := cleanJSONSchemaForGemini(t.Function.Parameters)
+			if err != nil {
+				return nil, fmt.Errorf("failed to clean parameters for tool %s: %w", t.Function.Name, err)
+			}
 			geminiReq.Tools[i] = geminiTool{
 				FunctionDeclarations: []geminiFunctionDeclaration{
 					{
 						Name:        t.Function.Name,
 						Description: t.Function.Description,
-						Parameters:  t.Function.Parameters,
+						Parameters:  cleanedParams,
 					},
 				},
 			}
@@ -520,4 +525,49 @@ func (a *geminiAdapter) parseStreamEvent(event *sseEvent, acc *streamAccumulator
 	}
 
 	return chunk, done, nil
+}
+
+// cleanJSONSchemaForGemini removes fields from JSON Schema that Gemini API doesn't support.
+// Specifically removes: $schema, additionalProperties (recursively)
+func cleanJSONSchemaForGemini(schema json.RawMessage) (json.RawMessage, error) {
+	if len(schema) == 0 {
+		return schema, nil
+	}
+
+	var obj map[string]any
+	if err := json.Unmarshal(schema, &obj); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal schema: %w", err)
+	}
+
+	// Recursively clean the schema
+	cleanSchemaObject(obj)
+
+	// Marshal back to JSON
+	cleaned, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal cleaned schema: %w", err)
+	}
+
+	return json.RawMessage(cleaned), nil
+}
+
+// cleanSchemaObject recursively removes unsupported fields from a schema object
+func cleanSchemaObject(obj map[string]any) {
+	// Remove unsupported fields
+	delete(obj, "$schema")
+	delete(obj, "additionalProperties")
+
+	// Recursively clean nested objects
+	for _, value := range obj {
+		switch v := value.(type) {
+		case map[string]any:
+			cleanSchemaObject(v)
+		case []any:
+			for _, item := range v {
+				if itemMap, ok := item.(map[string]any); ok {
+					cleanSchemaObject(itemMap)
+				}
+			}
+		}
+	}
 }

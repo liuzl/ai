@@ -73,9 +73,34 @@ func (c *AnthropicFormatConverter) ConvertRequestToUniversal(anthropicReq *Anthr
 	}
 
 	universalReq := &Request{
-		Model:        anthropicReq.Model,
-		SystemPrompt: anthropicReq.System,
-		Messages:     make([]Message, 0, len(anthropicReq.Messages)),
+		Model:    anthropicReq.Model,
+		Messages: make([]Message, 0, len(anthropicReq.Messages)),
+	}
+
+	// Handle system prompt (can be string or array of content blocks)
+	if anthropicReq.System != nil {
+		switch system := anthropicReq.System.(type) {
+		case string:
+			universalReq.SystemPrompt = system
+		case []any:
+			// Convert array of content blocks to string
+			// For now, extract text from all text blocks
+			var textParts []string
+			contentBytes, err := json.Marshal(system)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal system content array: %w", err)
+			}
+			var blocks []anthropicContentBlock
+			if err := json.Unmarshal(contentBytes, &blocks); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal system content blocks: %w", err)
+			}
+			for _, block := range blocks {
+				if block.Type == "text" && block.Text != "" {
+					textParts = append(textParts, block.Text)
+				}
+			}
+			universalReq.SystemPrompt = strings.Join(textParts, "\n")
+		}
 	}
 
 	// Convert messages
@@ -394,7 +419,7 @@ func generateAnthropicMessageID() string {
 // AnthropicIncomingRequest represents an Anthropic messages request.
 type AnthropicIncomingRequest struct {
 	Model     string                     `json:"model"`
-	System    string                     `json:"system,omitempty"`
+	System    any                        `json:"system,omitempty"` // Can be string or []anthropicContentBlock
 	Messages  []anthropicIncomingMessage `json:"messages"`
 	MaxTokens int                        `json:"max_tokens"`
 	Tools     []anthropicTool            `json:"tools,omitempty"`
