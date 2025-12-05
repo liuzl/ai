@@ -35,11 +35,12 @@ type StreamChunk struct {
 
 // ToolCallDelta represents incremental tool call data.
 type ToolCallDelta struct {
-	ID             string
-	Type           string
-	Function       string
-	ArgumentsDelta string
-	Done           bool
+	ID               string
+	Type             string
+	Function         string
+	ArgumentsDelta   string
+	ThoughtSignature string
+	Done             bool
 }
 
 // Stream invokes streaming generation when supported by the client.

@@ -166,6 +166,7 @@ func (a *geminiAdapter) processMessageParts(msg Message, allMsgs []Message, msgI
 					Name: tc.Function,
 					Args: args,
 				},
+				ThoughtSignature: tc.ThoughtSignature,
 			})
 		}
 	}
@@ -436,10 +437,11 @@ func (a *geminiAdapter) parseResponse(providerResp []byte) (*Response, error) {
 				return nil, fmt.Errorf("failed to generate random tool call ID: %w", err)
 			}
 			toolCall := ToolCall{
-				ID:        "gemini-tool-call-" + hex.EncodeToString(randBytes),
-				Type:      "function",
-				Function:  part.FunctionCall.Name,
-				Arguments: string(args),
+				ID:               "gemini-tool-call-" + hex.EncodeToString(randBytes),
+				Type:             "function",
+				Function:         part.FunctionCall.Name,
+				Arguments:        string(args),
+				ThoughtSignature: part.ThoughtSignature,
 			}
 			universalResp.ToolCalls = append(universalResp.ToolCalls, toolCall)
 		}
@@ -506,11 +508,12 @@ func (a *geminiAdapter) parseStreamEvent(event *sseEvent, acc *streamAccumulator
 			}
 
 			chunk.ToolCallDeltas = append(chunk.ToolCallDeltas, ToolCallDelta{
-				ID:             id,
-				Type:           "function",
-				Function:       part.FunctionCall.Name,
-				ArgumentsDelta: string(args),
-				Done:           true,
+				ID:               id,
+				Type:             "function",
+				Function:         part.FunctionCall.Name,
+				ArgumentsDelta:   string(args),
+				ThoughtSignature: part.ThoughtSignature,
+				Done:             true,
 			})
 		}
 	}

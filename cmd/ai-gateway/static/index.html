@@ -574,7 +574,12 @@
 
             // Add user message
             addMessage('user', message);
-            messages.push({ role: 'user', content: message });
+            // Store simple text and (for Gemini) explicit parts to allow carrying thought signatures later
+            messages.push({
+                role: 'user',
+                content: message,
+                parts: [{ text: message }]
+            });
 
             // Clear input
             input.value = '';
@@ -622,10 +627,13 @@
             } else if (format === 'gemini') {
                 endpoint = endpoint.replace('{model}', model);
                 // Gemini format
-                const contents = messages.map(msg => ({
-                    role: msg.role === 'assistant' ? 'model' : 'user',
-                    parts: [{ text: msg.content }]
-                }));
+                const contents = messages.map(msg => {
+                    const parts = (msg.parts && msg.parts.length > 0) ? msg.parts.map(p => ({ ...p })) : [{ text: msg.content }];
+                    return {
+                        role: msg.role === 'assistant' ? 'model' : 'user',
+                        parts
+                    };
+                });
                 requestBody = { contents };
             }
 
@@ -647,6 +655,8 @@
             const decoder = new TextDecoder();
             let assistantMessage = '';
             let contentDiv = null;
+            // Gemini-specific accumulators for thought signatures
+            let geminiThoughtSignature = null;
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -672,7 +682,15 @@
                                     content = parsed.delta?.text || '';
                                 }
                             } else if (format === 'gemini') {
-                                content = parsed.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                                const parts = parsed.candidates?.[0]?.content?.parts || [];
+                                for (const part of parts) {
+                                    if (part.thoughtSignature) {
+                                        geminiThoughtSignature = part.thoughtSignature;
+                                    }
+                                    if (part.text) {
+                                        content += part.text;
+                                    }
+                                }
                             }
 
                             if (content) {
@@ -698,7 +716,15 @@
             }
 
             if (assistantMessage) {
-                messages.push({ role: 'assistant', content: assistantMessage });
+                if (format === 'gemini') {
+                    const parts = [{ text: assistantMessage }];
+                    if (geminiThoughtSignature) {
+                        parts[0].thoughtSignature = geminiThoughtSignature;
+                    }
+                    messages.push({ role: 'assistant', content: assistantMessage, parts });
+                } else {
+                    messages.push({ role: 'assistant', content: assistantMessage });
+                }
             }
         }
     </script>

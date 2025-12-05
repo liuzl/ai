@@ -168,6 +168,9 @@ func (a *streamAccumulator) applyChunk(chunk *StreamChunk) {
 		if delta.Type != "" {
 			tc.call.Type = delta.Type
 		}
+		if delta.ThoughtSignature != "" {
+			tc.call.ThoughtSignature = delta.ThoughtSignature
+		}
 		if delta.ArgumentsDelta != "" {
 			tc.args.WriteString(delta.ArgumentsDelta)
 		}

@@ -156,10 +156,11 @@ func (c *GeminiFormatConverter) ConvertRequestToUniversal(geminiReq *GeminiGener
 					randBytes := make([]byte, 8)
 					rand.Read(randBytes)
 					msg.ToolCalls = append(msg.ToolCalls, ToolCall{
-						ID:        "gemini-" + hex.EncodeToString(randBytes),
-						Type:      "function",
-						Function:  part.FunctionCall.Name,
-						Arguments: string(args),
+						ID:               "gemini-" + hex.EncodeToString(randBytes),
+						Type:             "function",
+						Function:         part.FunctionCall.Name,
+						Arguments:        string(args),
+						ThoughtSignature: part.ThoughtSignature,
 					})
 				}
 			}
@@ -238,6 +239,7 @@ func (c *GeminiFormatConverter) ConvertResponseToGemini(universalResp *Response)
 					Name: tc.Function,
 					Args: args,
 				},
+				ThoughtSignature: tc.ThoughtSignature,
 			},
 		)
 	}
@@ -303,6 +305,7 @@ func buildGeminiStreamChunk(chunk *StreamChunk) any {
 				Name: tc.Function,
 				Args: args,
 			},
+			ThoughtSignature: tc.ThoughtSignature,
 		})
 	}
 	if chunk.Done {
@@ -344,8 +347,9 @@ type geminiStreamContent struct {
 }
 
 type geminiStreamPart struct {
-	Text         *string                   `json:"text,omitempty"`
-	FunctionCall *geminiStreamFunctionCall `json:"functionCall,omitempty"`
+	Text             *string                   `json:"text,omitempty"`
+	FunctionCall     *geminiStreamFunctionCall `json:"functionCall,omitempty"`
+	ThoughtSignature string                    `json:"thoughtSignature,omitempty"`
 }
 
 type geminiStreamFunctionCall struct {

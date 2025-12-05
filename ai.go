@@ -291,10 +291,11 @@ type FunctionDefinition struct {
 
 // ToolCall represents a request from the model to call a specific tool.
 type ToolCall struct {
-	ID        string
-	Type      string
-	Function  string
-	Arguments string
+	ID               string
+	Type             string
+	Function         string
+	Arguments        string
+	ThoughtSignature string // Provider-specific (e.g., Gemini thought signatures)
 }
 
 // Config holds all possible Configuration options for any client.
