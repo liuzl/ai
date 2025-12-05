@@ -173,6 +173,10 @@ func (s *ProxyServer) handleStream(
 			http.StatusBadRequest)
 		return
 	}
+	// Ensure resolved model is used downstream (important for default_model fallback)
+	if model != "" {
+		universalReq.Model = model
+	}
 
 	// Start streaming
 	streamReader, err := streamingClient.Stream(r.Context(), universalReq)
