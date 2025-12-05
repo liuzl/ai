@@ -43,7 +43,7 @@ models:
     description: "GLM-4.6 via Anthropic API"
 
 # Optional: fallback provider for unknown models
-# default_provider: "openai"
+default_model: "gemini-2.5-flash-lite"
 
 # Optional: custom timeout (default: 5m)
 # timeout: "5m"
