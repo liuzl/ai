@@ -134,6 +134,7 @@ func (c *AnthropicFormatConverter) ConvertRequestToUniversal(anthropicReq *Anthr
 
 			// Process content blocks
 			hasMultimodal := false
+			hasTools := false
 			var toolResultID string
 
 			// Check if it's a tool result or multimodal
@@ -148,10 +149,13 @@ func (c *AnthropicFormatConverter) ConvertRequestToUniversal(anthropicReq *Anthr
 				if block.Type == "image" {
 					hasMultimodal = true
 				}
+				if block.Type == "tool_use" {
+					hasTools = true
+				}
 			}
 
 			if universalMsg.Role != RoleTool {
-				if hasMultimodal || len(blocks) > 1 {
+				if hasMultimodal || hasTools || len(blocks) > 1 {
 					// Use ContentParts for multimodal content
 					universalMsg.ContentParts = make([]ContentPart, 0, len(blocks))
 					for _, block := range blocks {
