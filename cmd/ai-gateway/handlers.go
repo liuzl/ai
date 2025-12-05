@@ -61,25 +61,27 @@ func (s *ProxyServer) handleRequest(w http.ResponseWriter, r *http.Request, form
 		return
 	}
 
-	model := universalReq.Model
+	requestedModel := universalReq.Model
 
 	// Special handling for Gemini: extract model from URL if not in request body
-	if format == ai.ProviderGemini && model == "" {
-		model = extractGeminiModelFromURL(r.URL.Path)
-		if model == "" {
+	if format == ai.ProviderGemini && requestedModel == "" {
+		requestedModel = extractGeminiModelFromURL(r.URL.Path)
+		if requestedModel == "" {
 			s.handleError(w, r, format, "", "", fmt.Errorf("failed to extract model from URL: %s", r.URL.Path), http.StatusBadRequest)
 			return
 		}
 		// Update the universal request with the extracted model
-		universalReq.Model = model
+		universalReq.Model = requestedModel
 	}
 
-	// Look up provider for model in config
-	provider, err := s.config.GetProviderForModel(model)
+	// Resolve model/provider (fallback to default model if configured)
+	model, provider, err := s.config.ResolveModel(universalReq.Model)
 	if err != nil {
-		s.handleError(w, r, format, model, "", err, http.StatusBadRequest)
+		s.handleError(w, r, format, requestedModel, "", err, http.StatusBadRequest)
 		return
 	}
+	// Ensure downstream uses resolved model
+	universalReq.Model = model
 
 	// Increment active requests
 	s.metrics.IncActiveRequests(string(format), string(provider))

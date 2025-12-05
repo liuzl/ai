@@ -14,6 +14,7 @@ type ProxyConfig struct {
 	Version         string        `yaml:"version"`
 	Models          []ModelConfig `yaml:"models"`
 	DefaultProvider string        `yaml:"default_provider,omitempty"`
+	DefaultModel    string        `yaml:"default_model,omitempty"`
 	Timeout         string        `yaml:"timeout,omitempty"`
 }
 
@@ -99,6 +100,13 @@ func ValidateConfig(cfg *ProxyConfig) error {
 		}
 	}
 
+	// Validate default model if specified
+	if cfg.DefaultModel != "" {
+		if !seen[cfg.DefaultModel] {
+			return fmt.Errorf("default_model %q is not defined in models", cfg.DefaultModel)
+		}
+	}
+
 	return nil
 }
 
@@ -116,6 +124,33 @@ func (c *ProxyConfig) GetProviderForModel(model string) (ai.Provider, error) {
 	}
 
 	return "", fmt.Errorf("unknown model: %s", model)
+}
+
+// ResolveModel returns the resolved model name and provider.
+// If the requested model is unknown and a default_model is configured, the default is used.
+func (c *ProxyConfig) ResolveModel(requested string) (string, ai.Provider, error) {
+	for _, m := range c.Models {
+		if m.Name == requested {
+			return m.Name, ai.Provider(m.Provider), nil
+		}
+	}
+
+	// Fallback to default model if configured
+	if c.DefaultModel != "" {
+		for _, m := range c.Models {
+			if m.Name == c.DefaultModel {
+				return m.Name, ai.Provider(m.Provider), nil
+			}
+		}
+		return "", "", fmt.Errorf("default_model %q is not defined in models", c.DefaultModel)
+	}
+
+	// Legacy fallback: if only default_provider is set, return it but keep the requested name.
+	if c.DefaultProvider != "" {
+		return requested, ai.Provider(c.DefaultProvider), nil
+	}
+
+	return "", "", fmt.Errorf("unknown model: %s", requested)
 }
 
 // GetModelNames returns a list of all configured model names
